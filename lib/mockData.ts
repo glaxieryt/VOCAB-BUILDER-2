@@ -1254,8 +1254,8 @@ export const generateUnits = (): Unit[] => {
   return units;
 };
 
-// Helper to shuffle array
-const shuffle = <T>(array: T[]): T[] => [...array].sort(() => Math.random() - 0.5);
+// Helper to shuffle array (Exported for use in Learn.tsx fallback)
+export const shuffle = <T>(array: T[]): T[] => [...array].sort(() => Math.random() - 0.5);
 
 // New Helper to get words for a lesson to feed into AI
 export const getWordsForLesson = (lessonId: string): VocabularyWord[] => {

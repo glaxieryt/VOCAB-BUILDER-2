@@ -280,14 +280,38 @@ export const useStore = create<AppState>((set, get) => ({
     const unit = units.find(u => u.id === unitSeq);
     const lesson = unit?.lessons.find(l => l.lessonNumber === lessonNum);
 
-    // Guard: If running in Mock Mode, we can't save to DB.
-    if (!lesson || !(lesson as any).dbId) {
-        console.warn("Running in Mock Mode: Progress saved locally in session only.");
-        return;
+    let dbLessonId = (lesson as any)?.dbId;
+    let dbUnitId = (unit as any)?.dbId;
+
+    // RECOVERY MECHANISM: If running in Mock Mode but User is Authenticated, try to find the real IDs
+    // This solves the 'progress saving locally' issue if DB fetch failed initially but is actually available.
+    if (!dbLessonId && user) {
+        try {
+            // Try to find the unit first
+            const { data: realUnit } = await supabase.from('units').select('id').eq('sequence_number', unitSeq).single();
+            if (realUnit) {
+                dbUnitId = realUnit.id;
+                // Try to find the lesson
+                const { data: realLesson } = await supabase.from('lessons')
+                    .select('id')
+                    .eq('unit_id', realUnit.id)
+                    .eq('lesson_number', lessonNum)
+                    .single();
+                
+                if (realLesson) {
+                    dbLessonId = realLesson.id;
+                    console.log("Successfully recovered Lesson ID from DB for sync:", dbLessonId);
+                }
+            }
+        } catch (e) {
+            console.warn("Attempt to recover DB ID failed:", e);
+        }
     }
 
-    const dbLessonId = (lesson as any).dbId;
-    const dbUnitId = (unit as any).dbId;
+    if (!dbLessonId) {
+        console.warn("Running in Mock Mode: Progress saved locally in session only. (No Lesson ID found)");
+        return;
+    }
 
     // Update Profile
     await supabase.from('profiles').update({
@@ -309,31 +333,39 @@ export const useStore = create<AppState>((set, get) => ({
     if (lessonError) console.error("Error saving lesson progress:", lessonError.message);
 
     // If Test Passed, Unlock Next Unit
-    if (lesson.type === 'test' && score >= 75) {
-       const nextUnitSeq = unitSeq + 1;
-       const { data: nextUnitData } = await supabase
-         .from('units')
-         .select('id')
-         .eq('sequence_number', nextUnitSeq)
-         .single();
-       
-       if (nextUnitData) {
+    if (lesson!.type === 'test' && score >= 75) {
+       let nextUnitDbId = null;
+
+       // Try to find next unit ID
+       if (dbUnitId) {
+          const nextUnitSeq = unitSeq + 1;
+          const { data: nextUnitData } = await supabase
+            .from('units')
+            .select('id')
+            .eq('sequence_number', nextUnitSeq)
+            .single();
+          nextUnitDbId = nextUnitData?.id;
+       }
+
+       if (nextUnitDbId) {
          await supabase
            .from('user_unit_progress')
            .upsert({
              user_id: user.id,
-             unit_id: nextUnitData.id,
+             unit_id: nextUnitDbId,
              is_unlocked: true
            }, { onConflict: 'user_id, unit_id' });
        }
        
-       await supabase
-         .from('user_unit_progress')
-         .upsert({
-             user_id: user.id,
-             unit_id: dbUnitId,
-             is_completed: true
-         }, { onConflict: 'user_id, unit_id' });
+       if (dbUnitId) {
+           await supabase
+             .from('user_unit_progress')
+             .upsert({
+                 user_id: user.id,
+                 unit_id: dbUnitId,
+                 is_completed: true
+             }, { onConflict: 'user_id, unit_id' });
+       }
     }
   },
 

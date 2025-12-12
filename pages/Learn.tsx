@@ -4,7 +4,7 @@ import { useStore } from '../store/useStore';
 import { generateAIQuiz } from '../lib/ai';
 import { Exercise, VocabularyWord } from '../types';
 import { supabase } from '../lib/supabase';
-import { getWordsForLesson } from '../lib/mockData';
+import { getWordsForLesson, SEED_VOCABULARY, shuffle } from '../lib/mockData';
 
 // --- Sound Effects Utility ---
 const playSound = (type: 'correct' | 'incorrect') => {
@@ -179,15 +179,24 @@ export default function Learn() {
           }
           setQueue([...intro, ...aiQuestions]);
         } else {
-            // Basic fallback if AI fails: Simple definitions
-            const basicExercises: Exercise[] = words.map((w, idx) => ({
-                id: `basic-${w.id}-${idx}`,
-                type: 'mcq',
-                word: w,
-                questionText: `What is the definition of "${w.word}"?`,
-                options: [w.definition, 'Incorrect Def 1', 'Incorrect Def 2', 'Incorrect Def 3'].sort(() => Math.random() - 0.5),
-                correctAnswer: w.definition
-            }));
+            // SMART FALLBACK (Solves "Obvious Answers")
+            const basicExercises: Exercise[] = words.map((w, idx) => {
+                // Get 3 random distractors from SEED_VOCABULARY
+                // Shuffle entire vocab, filter out current word, take 3 definitions
+                const distractors = shuffle(SEED_VOCABULARY)
+                    .filter(sv => sv.id !== w.id && sv.definition !== w.definition)
+                    .slice(0, 3)
+                    .map(sv => sv.definition);
+
+                return {
+                    id: `basic-${w.id}-${idx}`,
+                    type: 'mcq',
+                    word: w,
+                    questionText: `What is the definition of "${w.word}"?`,
+                    options: shuffle([w.definition, ...distractors]),
+                    correctAnswer: w.definition
+                };
+            });
             setQueue(basicExercises);
         }
       } catch (err) {
