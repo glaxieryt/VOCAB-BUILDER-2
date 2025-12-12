@@ -16,7 +16,7 @@ export default function Auth() {
   const [localError, setLocalError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   
-  const { isAuthenticated, clearAuthError, initialize, authError } = useStore();
+  const { isAuthenticated, clearAuthError, initialize, authError, login } = useStore();
 
   useEffect(() => {
     setLocalError(null);
@@ -35,6 +35,8 @@ export default function Auth() {
     e.preventDefault();
     setLocalError(null);
     setIsLoading(true);
+
+    const cleanEmail = email.trim();
 
     // CRITICAL: Prevent "Failed to fetch" by checking config before network call
     if (!isSupabaseConfigured) {
@@ -66,13 +68,13 @@ export default function Auth() {
 
         // --- SIGNUP LOGIC ---
         const { data, error } = await supabase.auth.signUp({
-          email,
+          email: cleanEmail,
           password,
           options: {
             data: {
-              username: username,
-              full_name: username,
-              avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`
+              username: username.trim(),
+              full_name: username.trim(),
+              avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username.trim()}`
             }
           }
         });
@@ -93,20 +95,12 @@ export default function Auth() {
 
       } else {
         // --- LOGIN LOGIC ---
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
-        if (data?.session) {
-          await initialize();
-          navigate('/dashboard', { replace: true });
-        } else {
-          setLocalError("Something went wrong. No session created.");
-          setIsLoading(false);
-        }
+        // Use store action for consistency
+        await login(cleanEmail, password);
+        
+        // After successful login, refresh state
+        await initialize();
+        navigate('/dashboard', { replace: true });
       }
 
     } catch (err: any) {
@@ -116,6 +110,8 @@ export default function Auth() {
       // Handle Network/Fetch Errors specifically
       if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
         msg = "Connection failed. Please check your internet or Supabase URL.";
+      } else if (msg.includes("Invalid login credentials")) {
+        msg = "Invalid login credentials. Please check your email and password.";
       }
       
       setLocalError(msg);
@@ -138,7 +134,7 @@ export default function Auth() {
           </p>
 
           {(localError || authError) && (
-            <div className="mb-6 p-4 bg-error/10 border border-error/50 rounded-lg">
+            <div className="mb-6 p-4 bg-error/10 border border-error/50 rounded-lg animate-pulse">
                <div className="flex items-start gap-3">
                 <span className="text-xl">⚠️</span>
                 <p className="text-sm text-error font-medium pt-0.5">{localError || authError}</p>
