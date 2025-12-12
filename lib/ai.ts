@@ -8,12 +8,23 @@ const getAI = () => {
   if (!ai) {
     let apiKey = '';
     
-    // 1. Try Vite Standard (Preferred for Production)
-    if (import.meta.env.VITE_GEMINI_API_KEY) {
-      apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    // 1. Try Vite Standard (Preferred for Production) - Safe Access
+    try {
+      // @ts-ignore
+      if (typeof import.meta !== 'undefined' && import.meta.env) {
+        // @ts-ignore
+        if (import.meta.env.VITE_GEMINI_API_KEY) {
+            // @ts-ignore
+            apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+        }
+      }
+    } catch (e) {
+      // Ignore errors in environments where import.meta is not supported
     }
+
     // 2. Fallback to process.env (if configured in vite.config.ts or legacy)
-    else if (typeof process !== 'undefined' && process.env) {
+    if (!apiKey && typeof process !== 'undefined' && process.env) {
+      // @ts-ignore
       apiKey = process.env.VITE_GEMINI_API_KEY || process.env.API_KEY || '';
     }
 

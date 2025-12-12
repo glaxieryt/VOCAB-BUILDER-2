@@ -35,23 +35,49 @@ const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 };
 
 export default function App() {
-  const { initialize, syncUserData } = useStore();
+  const { initialize, setHydratedData } = useStore();
 
+  // 1. Initial Auth Check
   useEffect(() => {
     initialize();
   }, [initialize]);
 
-  // SYNC FUNCTION: Run this when 'user' session is detected to prevent 0 progress on reload
+  // 2. FIX: The "Sync on Load" Logic (User Request)
   useEffect(() => {
-    const syncUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        console.log("Session detected, syncing user data...");
-        await syncUserData();
+    const loadUserData = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      console.log("⚡ Restoring User Progress...");
+
+      // A. Load Lesson Progress (So green nodes stay green)
+      const { data: progress } = await supabase
+        .from('user_lesson_progress')
+        .select('lesson_id, is_completed, score, stars')
+        .eq('user_id', user.id)
+        .eq('is_completed', true);
+
+      // B. Load Flashcard State
+      const { data: cards } = await supabase
+        .from('user_flashcard_session_items')
+        .select(`
+            id,
+            word_id,
+            session_state,
+            word:vocabulary_words(*)
+          `)
+        .eq('user_id', user.id);
+
+      // C. Update the Store
+      if (progress || cards) {
+          setHydratedData(progress || [], cards || []);
+          // Ensure structure is up to date
+          useStore.getState().fetchCourseData(); 
       }
     };
-    syncUser();
-  }, [syncUserData]);
+
+    loadUserData();
+  }, [setHydratedData]);
 
   return (
     <Router>

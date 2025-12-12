@@ -277,6 +277,22 @@ export default function Learn() {
     )
   }
 
+  // Guard against empty queue
+  if (queue.length === 0) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center bg-[#0a092d] text-white p-4 text-center">
+            <h2 className="text-2xl font-bold mb-2">No Exercises Found</h2>
+            <p className="text-text-secondary mb-6">Could not load content for this lesson.</p>
+            <button 
+                onClick={() => navigate('/learning-path')}
+                className="bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg font-bold"
+            >
+                Back to Path
+            </button>
+        </div>
+      );
+  }
+
   const currentEx = queue[currentIndex];
   const progress = (currentIndex / queue.length) * 100;
 
