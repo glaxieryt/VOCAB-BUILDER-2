@@ -414,8 +414,23 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     try {
-      // 1. Fetch existing session items (attempt to load all)
-      const { data: existingItems, error: fetchError } = await supabase
+      // 1. Check current size of the deck
+      const { count, error: countError } = await supabase
+        .from('user_flashcard_session_items')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+
+      if (countError) throw countError;
+
+      // 2. Fix the "20 Words Bug": If the deck is small (incomplete), force populate via RPC
+      if (count === null || count < 100) {
+        console.log("Deck incomplete. Initializing full vocabulary via RPC...");
+        const { error: rpcError } = await supabase.rpc('reset_flashcard_session');
+        if (rpcError) throw rpcError;
+      }
+
+      // 3. Fetch ALL items without any limits to ensure we get the full 1161+ words
+      const { data, error } = await supabase
         .from('user_flashcard_session_items')
         .select(`
           id,
@@ -425,31 +440,9 @@ export const useStore = create<AppState>((set, get) => ({
         `)
         .eq('user_id', user.id);
 
-      if (fetchError) throw fetchError;
+      if (error) throw error;
+      set({ flashcards: data as FlashcardItem[] });
 
-      if (existingItems && existingItems.length > 0) {
-        set({ flashcards: existingItems as FlashcardItem[] });
-      } else {
-        // 2. If empty, utilize the RPC to populate ALL words
-        // This ensures we get the full deck efficiently
-        const { error: rpcError } = await supabase.rpc('reset_flashcard_session');
-        
-        if (rpcError) throw rpcError;
-
-        // Fetch them now that they are populated
-        const { data: newItems, error: refetchError } = await supabase
-            .from('user_flashcard_session_items')
-            .select(`
-              id,
-              word_id,
-              session_state,
-              word:vocabulary_words(*)
-            `)
-            .eq('user_id', user.id);
-            
-        if (refetchError) throw refetchError;
-        set({ flashcards: newItems as FlashcardItem[] });
-      }
     } catch (e) {
       console.error("Error loading flashcards:", e);
     }
@@ -475,16 +468,20 @@ export const useStore = create<AppState>((set, get) => ({
      const { user } = get();
      if (!user) return;
 
-     // Optimistic Update: Set all local to 'pending' immediately for UI responsiveness
+     // 1. Optimistic Update: INSTANTLY set all to pending so UI counters hit 0
      set(prev => ({
        flashcards: prev.flashcards.map(item => ({ ...item, session_state: 'pending' }))
      }));
 
     if (isSupabaseConfigured) {
-       // Call the backend function to reset DB state efficiently for all words
+       // 2. Call RPC to reset backend state for all items
        const { error } = await supabase.rpc('reset_flashcard_session');
+       
        if (error) {
            console.error("Failed to reset via RPC", error);
+       } else {
+           // 3. Reload session to ensure exact sync
+           await get().loadFlashcardSession();
        }
     }
   }

@@ -11,6 +11,7 @@ export default function Flashcards() {
   const [queue, setQueue] = useState<FlashcardItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFinished, setIsFinished] = useState(false);
+  const [round, setRound] = useState(1);
   
   // Card Interaction State
   const [isFlipped, setIsFlipped] = useState(false);
@@ -22,19 +23,23 @@ export default function Flashcards() {
   const startX = useRef(0);
   const cardRef = useRef<HTMLDivElement>(null);
   
-  // Global Counters derived from Main Store
+  // Global Counters
   const countLearning = flashcards.filter(f => f.session_state === 'still_learning').length;
   const countKnow = flashcards.filter(f => f.session_state === 'know').length;
+  const countPending = flashcards.filter(f => f.session_state === 'pending').length;
 
   useEffect(() => {
+    // Initial Load
     loadFlashcardSession();
   }, []);
 
-  // Initialize Queue when flashcards are loaded or reset
+  // Effect to populate queue INITIALLY or when Reset occurs
   useEffect(() => {
+    // Only auto-fill if queue is empty, we aren't finished, and we haven't started a round yet (index 0)
+    // This prevents the effect from interfering with the manual "Next Round" logic
     if (flashcards.length > 0 && queue.length === 0 && !isFinished) {
-      // Logic: Start with all pending + still_learning
       const activeItems = flashcards.filter(f => f.session_state !== 'know');
+      
       if (activeItems.length > 0) {
         setQueue(activeItems);
         setCurrentIndex(0);
@@ -42,7 +47,7 @@ export default function Flashcards() {
          setIsFinished(true);
       }
     }
-  }, [flashcards]);
+  }, [flashcards, isFinished]); // Minimal dependencies to strictly handle "Load" and "Reset" states
 
   // Handle Touch/Swipe Gestures
   const handleTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
@@ -62,59 +67,83 @@ export default function Flashcards() {
   const handleTouchEnd = () => {
     setIsDragging(false);
     
-    // Swipe Thresholds
     if (dragX > 100) {
       handleSwipe('right');
     } else if (dragX < -100) {
       handleSwipe('left');
     } else {
-      setDragX(0); // Reset position if not swiped far enough
+      setDragX(0);
     }
   };
 
   const handleSwipe = async (direction: 'left' | 'right') => {
-    const currentCard = queue[currentIndex];
-    
-    // 1. Update DB/Store
-    const newState = direction === 'right' ? 'know' : 'still_learning';
-    await markFlashcard(currentCard.id, newState);
+    if (!queue[currentIndex]) return;
 
-    // 2. Animate and move to next
-    setDragX(direction === 'right' ? 500 : -500); // Fly off screen
+    const currentCard = queue[currentIndex];
+    const newState = direction === 'right' ? 'know' : 'still_learning';
     
-    setTimeout(() => {
+    // 1. Trigger Animation
+    setDragX(direction === 'right' ? 500 : -500); // Fly off screen
+
+    // 2. Wait for animation
+    setTimeout(async () => {
+      // 3. Update DB/Store (Important: Update state AFTER animation starts to avoid jank)
+      await markFlashcard(currentCard.id, newState);
+      
       setDragX(0);
       setIsFlipped(false);
       
+      // 4. Determine Next Step
       if (currentIndex < queue.length - 1) {
+        // Move to next card in current queue
         setCurrentIndex(prev => prev + 1);
       } else {
-        // End of Queue reached - Check for Loop
-        handleEndOfRound();
+        // --- END OF DECK LOGIC ---
+        // We reached the end of the current queue.
+        // Re-calculate based on the *latest* store state (which includes the update we just made)
+        // We filter for anything that is NOT 'know'. 
+        // This naturally catches 'still_learning' from the pass we just finished.
+        const remainingItems = flashcards
+          .map(item => item.id === currentCard.id ? { ...item, session_state: newState } : item) // localized optimistic check
+          .filter(f => f.session_state !== 'know');
+
+        if (remainingItems.length > 0) {
+          // Restart loop with remaining items
+          setQueue(remainingItems);
+          setCurrentIndex(0);
+          setRound(r => r + 1);
+          // Optional: Show a quick toast or indicator that round restarted?
+        } else {
+          // Nothing left to learn!
+          setIsFinished(true);
+          setQueue([]);
+        }
       }
     }, 200);
   };
 
-  const handleEndOfRound = () => {
-    // Force reset queue to trigger effect that refills it from store
-    setQueue([]); 
-  };
-
   const handleReset = async () => {
+    // 1. Show Confirmation Popup
+    const confirmed = window.confirm("Are you sure you want to reset your progress? This will restart the entire deck.");
+    if (!confirmed) return;
+
+    // 2. Trigger Reset
     await resetFlashcards();
+    
+    // 3. Reset Local State
     setQueue([]); 
     setIsFinished(false);
     setCurrentIndex(0);
     setDragX(0);
     setIsFlipped(false);
+    setRound(1);
     
-    // Trigger Toast
+    // 4. Show Toast
     setShowToast(true);
     setTimeout(() => setShowToast(false), 3000);
   };
 
   // --- RENDER ---
-
   const currentCard = queue[currentIndex];
   
   // Calculate Rotation and Opacity based on Drag
@@ -122,7 +151,16 @@ export default function Flashcards() {
   const opacityGreen = Math.max(0, dragX / 200);
   const opacityOrange = Math.max(0, -dragX / 200);
 
-  if (!currentCard && !isFinished) return <div className="flex h-full items-center justify-center"><div className="animate-spin text-4xl">⏳</div></div>;
+  // Loading State
+  if (!currentCard && !isFinished) {
+    return (
+      <div className="flex flex-col h-[calc(100vh-64px)] items-center justify-center bg-[#0a092d]">
+        <div className="animate-spin text-4xl mb-4 text-primary">⏳</div>
+        <p className="text-text-secondary animate-pulse">Loading your deck...</p>
+        <p className="text-xs text-text-disabled mt-2">Fetching {flashcards.length || '...'} words</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex flex-col h-[calc(100vh-64px)] overflow-hidden relative bg-[#0a092d]">
@@ -130,22 +168,29 @@ export default function Flashcards() {
       {/* 1. Header Counters */}
       <div className="flex justify-between items-center p-4 pt-6 max-w-md mx-auto w-full relative z-10">
         {/* Still Learning Counter */}
-        <div className="flex flex-col items-center">
-          <div className="w-10 h-10 rounded-full border-2 border-warning flex items-center justify-center text-warning font-bold bg-warning/10 transition-all duration-300">
-            {countLearning}
+        <div className="flex flex-col items-center gap-1">
+          <div className="w-12 h-12 rounded-full border-2 border-warning flex items-center justify-center text-warning font-bold bg-warning/10 transition-all duration-300 shadow-lg shadow-warning/20">
+            {countLearning + countPending}
           </div>
+          <span className="text-[10px] uppercase tracking-wider text-text-secondary font-bold">To Learn</span>
         </div>
 
         {/* Progress Text */}
-        <div className="text-text-secondary font-bold text-lg">
-           {isFinished ? 'All Done!' : `${currentIndex + 1} / ${queue.length}`}
+        <div className="text-center">
+           <div className="text-text-secondary font-bold text-lg">
+             {isFinished ? 'Complete' : `Card ${currentIndex + 1} / ${queue.length}`}
+           </div>
+           {!isFinished && (
+             <div className="text-xs text-text-disabled mt-1 uppercase tracking-widest">Round {round}</div>
+           )}
         </div>
 
         {/* Known Counter */}
-        <div className="flex flex-col items-center">
-          <div className="w-10 h-10 rounded-full border-2 border-success flex items-center justify-center text-success font-bold bg-success/10 transition-all duration-300">
+        <div className="flex flex-col items-center gap-1">
+          <div className="w-12 h-12 rounded-full border-2 border-success flex items-center justify-center text-success font-bold bg-success/10 transition-all duration-300 shadow-lg shadow-success/20">
             {countKnow}
           </div>
+          <span className="text-[10px] uppercase tracking-wider text-text-secondary font-bold">Mastered</span>
         </div>
       </div>
 
@@ -154,9 +199,15 @@ export default function Flashcards() {
         
         {isFinished ? (
            <div className="text-center p-8 animate-pulse">
-             <div className="text-6xl mb-4">🎉</div>
-             <h2 className="text-3xl font-bold text-white mb-2">Session Complete!</h2>
-             <p className="text-text-secondary">You've reviewed all cards.</p>
+             <div className="text-8xl mb-6">🎉</div>
+             <h2 className="text-4xl font-display font-bold text-white mb-4">Deck Mastered!</h2>
+             <p className="text-xl text-text-secondary mb-8">You've learned all {flashcards.length} words.</p>
+             <button 
+               onClick={handleReset}
+               className="bg-primary hover:bg-primary/90 text-white px-8 py-3 rounded-full font-bold shadow-xl shadow-primary/30 transition-transform hover:scale-105"
+             >
+               Start Over
+             </button>
            </div>
         ) : (
           <div 
@@ -179,35 +230,57 @@ export default function Flashcards() {
             {currentIndex < queue.length - 1 && (
               <div className="absolute top-2 left-2 right-[-8px] bottom-[-8px] bg-surface/50 border border-white/5 rounded-3xl -z-10 scale-95" />
             )}
+            
+            {/* Second Background Card for depth */}
+            {currentIndex < queue.length - 2 && (
+              <div className="absolute top-4 left-4 right-[-16px] bottom-[-16px] bg-surface/30 border border-white/5 rounded-3xl -z-20 scale-90" />
+            )}
 
             {/* Main Card Container */}
             <div className={`w-full h-full relative preserve-3d transition-transform duration-500 rounded-3xl shadow-2xl ${isFlipped ? 'rotate-y-180' : ''}`}>
               
               {/* FRONT (WORD) */}
-              <div className="absolute inset-0 backface-hidden bg-surface border border-white/10 rounded-3xl flex flex-col items-center justify-center p-8 text-center select-none">
+              <div className="absolute inset-0 backface-hidden bg-surface border border-white/10 rounded-3xl flex flex-col items-center justify-center p-8 text-center select-none overflow-hidden">
+                 
+                 {/* Decorative background blur */}
+                 <div className="absolute -top-20 -right-20 w-40 h-40 bg-primary/10 rounded-full blur-3xl pointer-events-none"></div>
+                 <div className="absolute -bottom-20 -left-20 w-40 h-40 bg-secondary/10 rounded-full blur-3xl pointer-events-none"></div>
+
                  {/* Swipe Overlays */}
-                 <div className="absolute inset-0 bg-success/20 rounded-3xl z-10 pointer-events-none transition-opacity" style={{ opacity: opacityGreen }}>
-                    <div className="absolute top-8 left-8 border-4 border-success text-success font-bold text-2xl px-4 py-2 rounded-xl -rotate-12">KNOW</div>
+                 <div className="absolute inset-0 bg-success/20 rounded-3xl z-10 pointer-events-none transition-opacity flex items-center justify-center" style={{ opacity: opacityGreen }}>
+                    <div className="border-4 border-success text-success font-bold text-4xl px-6 py-2 rounded-xl -rotate-12 bg-surface/80 backdrop-blur-sm">KNOW</div>
                  </div>
-                 <div className="absolute inset-0 bg-warning/20 rounded-3xl z-10 pointer-events-none transition-opacity" style={{ opacity: opacityOrange }}>
-                    <div className="absolute top-8 right-8 border-4 border-warning text-warning font-bold text-2xl px-4 py-2 rounded-xl rotate-12">LEARNING</div>
+                 <div className="absolute inset-0 bg-warning/20 rounded-3xl z-10 pointer-events-none transition-opacity flex items-center justify-center" style={{ opacity: opacityOrange }}>
+                    <div className="border-4 border-warning text-warning font-bold text-4xl px-6 py-2 rounded-xl rotate-12 bg-surface/80 backdrop-blur-sm">LEARNING</div>
                  </div>
 
-                 <div className="text-sm uppercase tracking-widest text-text-secondary mb-8 font-bold">Word</div>
-                 <h2 className="text-4xl md:text-5xl font-display font-bold text-white mb-4">{currentCard.word.word}</h2>
-                 <p className="text-text-secondary italic">{currentCard.word.part_of_speech}</p>
+                 <div className="text-xs uppercase tracking-[0.2em] text-text-secondary mb-12 font-bold bg-white/5 px-3 py-1 rounded-full"> Vocabulary </div>
                  
-                 <div className="absolute bottom-8 text-sm text-text-disabled animate-bounce">
-                   Tap to flip
+                 <h2 className="text-4xl md:text-5xl font-display font-bold text-white mb-6 leading-tight drop-shadow-lg">
+                   {currentCard.word.word}
+                 </h2>
+                 
+                 <p className="text-lg text-secondary font-medium italic opacity-80">{currentCard.word.part_of_speech}</p>
+                 
+                 <div className="absolute bottom-8 flex flex-col items-center gap-2 animate-bounce opacity-50">
+                   <span className="text-xs text-text-disabled uppercase tracking-widest">Tap to flip</span>
+                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
                  </div>
               </div>
 
               {/* BACK (DEFINITION) */}
-              <div className="absolute inset-0 backface-hidden bg-[#151336] border border-white/10 rounded-3xl flex flex-col items-center justify-center p-8 text-center rotate-y-180 select-none">
-                 <div className="text-sm uppercase tracking-widest text-text-secondary mb-6 font-bold">Definition</div>
-                 <p className="text-xl leading-relaxed text-white mb-6">{currentCard.word.definition}</p>
-                 <div className="w-full h-px bg-white/10 mb-6"></div>
-                 <p className="text-text-secondary italic">"{currentCard.word.example_sentence}"</p>
+              <div className="absolute inset-0 backface-hidden bg-[#0F0D25] border border-white/10 rounded-3xl flex flex-col items-center justify-center p-8 text-center rotate-y-180 select-none overflow-y-auto custom-scrollbar">
+                 <div className="text-xs uppercase tracking-[0.2em] text-text-secondary mb-8 font-bold bg-white/5 px-3 py-1 rounded-full">Definition</div>
+                 
+                 <p className="text-xl md:text-2xl leading-relaxed text-white mb-8 font-medium">
+                   {currentCard.word.definition}
+                 </p>
+                 
+                 <div className="w-16 h-1 bg-gradient-to-r from-primary to-secondary rounded-full mb-8 opacity-50"></div>
+                 
+                 <div className="bg-white/5 p-4 rounded-xl border border-white/5 w-full">
+                   <p className="text-text-secondary italic text-sm leading-relaxed">"{currentCard.word.example_sentence}"</p>
+                 </div>
               </div>
             </div>
           </div>
@@ -215,21 +288,28 @@ export default function Flashcards() {
       </div>
 
       {/* 3. Footer Controls */}
-      <div className="p-6 w-full flex justify-center pb-12">
-        <button 
-          onClick={handleReset}
-          className="text-text-secondary hover:text-white transition-colors text-sm font-medium border border-white/10 px-6 py-2 rounded-full hover:bg-white/5"
-        >
-          Reset Cards
-        </button>
+      <div className="p-6 w-full flex justify-center pb-8 gap-4">
+        {!isFinished && (
+           <button 
+             onClick={handleReset}
+             className="text-text-secondary hover:text-white transition-colors text-xs font-bold border border-white/10 px-4 py-2 rounded-full hover:bg-white/5 uppercase tracking-wider"
+           >
+             Reset Progress
+           </button>
+        )}
       </div>
 
       {/* Toast Notification */}
       <div 
-        className={`fixed bottom-24 left-1/2 -translate-x-1/2 bg-surface border border-white/10 shadow-2xl px-6 py-3 rounded-xl flex items-center gap-3 transition-all duration-300 z-50 ${showToast ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}
+        className={`fixed bottom-24 left-1/2 -translate-x-1/2 bg-surface border border-white/10 shadow-2xl px-6 py-4 rounded-xl flex items-center gap-3 transition-all duration-300 z-50 pointer-events-none transform ${showToast ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-4 scale-95'}`}
       >
-        <span className="text-xl">🔄</span>
-        <span className="font-bold text-white">Progress Reset: Ready to practice again.</span>
+        <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        </div>
+        <div>
+          <h4 className="font-bold text-white text-sm">Progress Reset</h4>
+          <p className="text-xs text-text-secondary">Deck restarted from the beginning.</p>
+        </div>
       </div>
 
       {/* Global CSS for 3D Flip */}
@@ -238,6 +318,8 @@ export default function Flashcards() {
         .preserve-3d { transform-style: preserve-3d; }
         .backface-hidden { backface-visibility: hidden; }
         .rotate-y-180 { transform: rotateY(180deg); }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
       `}</style>
     </div>
   );
