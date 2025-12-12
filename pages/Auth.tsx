@@ -15,7 +15,7 @@ export default function Auth() {
   const [localError, setLocalError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   
-  const { isAuthenticated, clearAuthError, initialize } = useStore();
+  const { isAuthenticated, clearAuthError, initialize, authError } = useStore();
 
   useEffect(() => {
     setLocalError(null);
@@ -130,10 +130,10 @@ export default function Auth() {
             {isSignup ? 'Start your vocabulary mastery journey' : 'Continue learning where you left off'}
           </p>
 
-          {localError && (
+          {(localError || authError) && (
             <div className="mb-6 p-4 bg-error/10 border border-error/50 rounded-lg flex items-start gap-3">
               <span className="text-xl">⚠️</span>
-              <p className="text-sm text-error font-medium pt-0.5">{localError}</p>
+              <p className="text-sm text-error font-medium pt-0.5">{localError || authError}</p>
             </div>
           )}
           

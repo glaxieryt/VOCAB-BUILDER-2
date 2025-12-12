@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { User, Unit, LessonNode, FlashcardItem, FlashcardState } from '../types';
 import { seedDatabase } from '../lib/seeder';
 
@@ -41,26 +41,43 @@ export const useStore = create<AppState>((set, get) => ({
   initialize: async () => {
     set({ isLoading: true });
     
+    if (!isSupabaseConfigured) {
+      console.warn("Supabase credentials missing.");
+      set({ 
+        authError: "Supabase not configured. Please connect to a project.",
+        isLoading: false 
+      });
+      return;
+    }
+
     try {
       // 1. Check connection & Seed if necessary
       const { count, error: countError } = await supabase.from('units').select('*', { count: 'exact', head: true });
       
       if (countError) {
-        throw countError; // Throwing here to be caught by catch block below
+        console.error("Database check failed:", countError.message);
+        throw countError; 
       } else if (count === 0) {
+         console.log("Database empty, seeding...");
          await seedDatabase();
       }
 
       // 2. Get User Session
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
+      if (sessionError) throw sessionError;
+
       if (session?.user) {
         // 3. Fetch User Profile
-        const { data: profile } = await supabase
+        const { data: profile, error: profileError } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', session.user.id)
           .single();
+
+        if (profileError && profileError.code !== 'PGRST116') { // Ignore 'not found' if it's just missing profile
+            console.error("Profile fetch error:", profileError.message);
+        }
 
         if (profile) {
           set({
@@ -92,9 +109,15 @@ export const useStore = create<AppState>((set, get) => ({
       });
 
     } catch (error: any) {
-      console.error("Initialization error:", error);
-      // No mock fallback. State remains uninitialized or shows error.
-      set({ authError: "Failed to connect to database. Please check your connection." });
+      const msg = error.message || "Unknown error occurred";
+      console.error("Initialization error:", msg);
+      
+      // If table doesn't exist
+      if (msg.includes('relation') && msg.includes('does not exist')) {
+        set({ authError: "Database setup incomplete. Tables missing." });
+      } else {
+        set({ authError: `Connection Error: ${msg}` });
+      }
     } finally {
       set({ isLoading: false });
     }
@@ -165,8 +188,8 @@ export const useStore = create<AppState>((set, get) => ({
       });
 
       set({ units: mergedUnits });
-    } catch (err) {
-      console.error("Error fetching course data:", err);
+    } catch (err: any) {
+      console.error("Error fetching course data:", err.message);
     }
   },
 
@@ -266,7 +289,7 @@ export const useStore = create<AppState>((set, get) => ({
         stars
       }, { onConflict: 'user_id, lesson_id' });
 
-    if (lessonError) console.error("Error saving lesson progress:", lessonError);
+    if (lessonError) console.error("Error saving lesson progress:", lessonError.message);
 
     // C. Handle Unit Test Completion (Unlock next unit)
     if (lesson.type === 'test' && score >= 75) {
@@ -358,8 +381,8 @@ export const useStore = create<AppState>((set, get) => ({
 
       set({ flashcards: allItems });
 
-    } catch (e) {
-      console.error("Error loading flashcards:", e);
+    } catch (e: any) {
+      console.error("Error loading flashcards:", e.message);
     }
   },
 
@@ -377,7 +400,7 @@ export const useStore = create<AppState>((set, get) => ({
       .eq('id', itemId);
       
     if (error) {
-        console.error("Failed to update flashcard state in DB:", error);
+        console.error("Failed to update flashcard state in DB:", error.message);
     }
   },
 
@@ -391,7 +414,7 @@ export const useStore = create<AppState>((set, get) => ({
 
      const { error } = await supabase.rpc('reset_flashcard_session');
      if (error) {
-         console.error("Failed to reset via RPC", error);
+         console.error("Failed to reset via RPC", error.message);
      } else {
          await get().loadFlashcardSession();
      }
