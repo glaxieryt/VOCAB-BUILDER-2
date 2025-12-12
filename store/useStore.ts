@@ -41,14 +41,8 @@ export const useStore = create<AppState>((set, get) => ({
   initialize: async () => {
     set({ isLoading: true });
     
-    if (!isSupabaseConfigured) {
-      console.warn("Supabase credentials missing.");
-      set({ 
-        authError: "Supabase not configured. Please connect to a project.",
-        isLoading: false 
-      });
-      return;
-    }
+    // Strict check: We rely on lib/supabase.ts to throw if keys are missing.
+    // Here we just proceed assuming connection is configured.
 
     try {
       // 1. Check connection & Seed if necessary
@@ -341,9 +335,10 @@ export const useStore = create<AppState>((set, get) => ({
 
       if (countError) throw countError;
 
-      // Fix "20 Words" issue: Ensure full deck is initialized via RPC
+      // Ensure full deck is initialized via RPC if counts are suspicious (empty or just the 20 demo words)
+      // Increasing the threshold to 100 to catch the demo state.
       if (count === null || count < 100) {
-        console.log("Deck incomplete. Initializing full vocabulary via RPC...");
+        console.log("Deck incomplete (count: " + count + "). Initializing full vocabulary via RPC...");
         const { error: rpcError } = await supabase.rpc('reset_flashcard_session');
         if (rpcError) throw rpcError;
       }

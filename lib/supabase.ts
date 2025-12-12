@@ -1,22 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Safely access environment variables to prevent runtime crashes
+// Strict Environment Variable Check to ensure we connect to the real database
 // @ts-ignore
-const env = (typeof import.meta !== 'undefined') ? import.meta.env : null;
-
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 // @ts-ignore
-const supabaseUrl = (env && env.VITE_SUPABASE_URL) || '';
-// @ts-ignore
-const supabaseKey = (env && env.VITE_SUPABASE_ANON_KEY) || '';
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Check if we are using real credentials or placeholders
-export const isSupabaseConfigured = supabaseUrl && supabaseKey && supabaseUrl !== 'https://placeholder.supabase.co';
-
-if (!isSupabaseConfigured) {
-  console.warn("Supabase credentials missing! App running in Mock Mode. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to use a real DB.");
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('MISSING SUPABASE KEYS: Check Vercel Environment Variables. VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are required.');
 }
 
-export const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co', 
-  supabaseKey || 'placeholder'
-);
+export const isSupabaseConfigured = true;
+
+export const supabase = createClient(supabaseUrl, supabaseKey);
