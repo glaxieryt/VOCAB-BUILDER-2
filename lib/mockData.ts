@@ -1254,8 +1254,15 @@ export const generateUnits = (): Unit[] => {
   return units;
 };
 
-// Helper to shuffle array (Exported for use in Learn.tsx fallback)
-export const shuffle = <T>(array: T[]): T[] => [...array].sort(() => Math.random() - 0.5);
+// Fisher-Yates Shuffle - Standard unbiased shuffle
+export const shuffle = <T>(array: T[]): T[] => {
+  const newArr = [...array];
+  for (let i = newArr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+  }
+  return newArr;
+};
 
 // New Helper to get words for a lesson to feed into AI
 export const getWordsForLesson = (lessonId: string): VocabularyWord[] => {

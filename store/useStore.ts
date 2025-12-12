@@ -276,9 +276,9 @@ export const useStore = create<AppState>((set, get) => ({
     // 1. Calculate XP and Streak Update
     const xpEarned = 10 + (stars * 5);
     const newXP = user.total_xp + xpEarned;
-    const newStreak = user.current_streak + 1; // Simplified streak logic for now
+    const newStreak = user.current_streak + 1;
 
-    // 2. Optimistic Update
+    // 2. Optimistic Update (UI Feedback)
     const updatedUnits = units.map(u => {
        if (u.id === unitSeq) {
            const updatedLessons = u.lessons.map(l => {
@@ -300,7 +300,7 @@ export const useStore = create<AppState>((set, get) => ({
         user: { ...user, total_xp: newXP, current_streak: newStreak }
     });
 
-    // 3. Database Updates (Critical)
+    // 3. Database Updates (Critical Persistence)
     const unit = units.find(u => u.id === unitSeq);
     const lesson = unit?.lessons.find(l => l.lessonNumber === lessonNum);
 
@@ -308,7 +308,6 @@ export const useStore = create<AppState>((set, get) => ({
     let dbUnitId = (unit as any)?.dbId;
 
     // RECOVERY MECHANISM: If running in Mock Mode but User is Authenticated, try to find the real IDs
-    // This solves the 'progress saving locally' issue if DB fetch failed initially but is actually available.
     if (!dbLessonId && user) {
         try {
             // Try to find the unit first
@@ -324,7 +323,6 @@ export const useStore = create<AppState>((set, get) => ({
                 
                 if (realLesson) {
                     dbLessonId = realLesson.id;
-                    console.log("Successfully recovered Lesson ID from DB for sync:", dbLessonId);
                 }
             }
         } catch (e) {
@@ -333,63 +331,75 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     if (!dbLessonId) {
-        console.warn("Running in Mock Mode: Progress saved locally in session only. (No Lesson ID found)");
+        console.warn("⚠️ Cannot save progress: No Database Lesson ID found.");
         return;
     }
 
-    // Update Profile
-    await supabase.from('profiles').update({
-        total_xp: newXP,
-        current_streak: newStreak
-    }).eq('id', user.id);
+    console.log(`💾 Saving Progress for Lesson ${dbLessonId}...`);
 
-    // Update Lesson Progress
-    const { error: lessonError } = await supabase
-      .from('user_lesson_progress')
-      .upsert({
-        user_id: user.id,
-        lesson_id: dbLessonId,
-        is_completed: true, 
-        score,
-        stars
-      }, { onConflict: 'user_id, lesson_id' });
+    try {
+        // Update Profile XP/Streak
+        const { error: profileError } = await supabase.from('profiles').update({
+            total_xp: newXP,
+            current_streak: newStreak
+        }).eq('id', user.id);
+        
+        if (profileError) console.error("Error saving profile XP:", profileError.message);
 
-    if (lessonError) console.error("Error saving lesson progress:", lessonError.message);
+        // Update Lesson Progress Table
+        const { error: lessonError } = await supabase
+          .from('user_lesson_progress')
+          .upsert({
+            user_id: user.id,
+            lesson_id: dbLessonId,
+            is_completed: true, 
+            score,
+            stars
+          }, { onConflict: 'user_id, lesson_id' });
 
-    // If Test Passed, Unlock Next Unit
-    if (lesson!.type === 'test' && score >= 75) {
-       let nextUnitDbId = null;
+        if (lessonError) {
+             console.error("Error saving lesson progress:", lessonError.message);
+        } else {
+             console.log("✅ Lesson Progress Saved!");
+        }
 
-       // Try to find next unit ID
-       if (dbUnitId) {
-          const nextUnitSeq = unitSeq + 1;
-          const { data: nextUnitData } = await supabase
-            .from('units')
-            .select('id')
-            .eq('sequence_number', nextUnitSeq)
-            .single();
-          nextUnitDbId = nextUnitData?.id;
-       }
+        // If Test Passed, Unlock Next Unit
+        if (lesson!.type === 'test' && score >= 75) {
+           let nextUnitDbId = null;
 
-       if (nextUnitDbId) {
-         await supabase
-           .from('user_unit_progress')
-           .upsert({
-             user_id: user.id,
-             unit_id: nextUnitDbId,
-             is_unlocked: true
-           }, { onConflict: 'user_id, unit_id' });
-       }
-       
-       if (dbUnitId) {
-           await supabase
-             .from('user_unit_progress')
-             .upsert({
+           // Try to find next unit ID
+           if (dbUnitId) {
+              const nextUnitSeq = unitSeq + 1;
+              const { data: nextUnitData } = await supabase
+                .from('units')
+                .select('id')
+                .eq('sequence_number', nextUnitSeq)
+                .single();
+              nextUnitDbId = nextUnitData?.id;
+           }
+
+           if (nextUnitDbId) {
+             await supabase
+               .from('user_unit_progress')
+               .upsert({
                  user_id: user.id,
-                 unit_id: dbUnitId,
-                 is_completed: true
-             }, { onConflict: 'user_id, unit_id' });
-       }
+                 unit_id: nextUnitDbId,
+                 is_unlocked: true
+               }, { onConflict: 'user_id, unit_id' });
+           }
+           
+           if (dbUnitId) {
+               await supabase
+                 .from('user_unit_progress')
+                 .upsert({
+                     user_id: user.id,
+                     unit_id: dbUnitId,
+                     is_completed: true
+                 }, { onConflict: 'user_id, unit_id' });
+           }
+        }
+    } catch (err) {
+        console.error("Complete Lesson Transaction Failed:", err);
     }
   },
 
@@ -403,15 +413,12 @@ export const useStore = create<AppState>((set, get) => ({
 
   loadFlashcardSession: async () => {
     const { user } = get();
-    // We need a user to have a session, but if we are falling back to mock data, 
-    // we can attach it to a fake user or just ignore the user ID constraint for local state.
     if (!user) return; 
 
     try {
       if (!isSupabaseConfigured) throw new Error("Supabase not configured");
 
       // 1. Check if we need to initialize/reset the session
-      // If the user has NO items in the session table, call the RPC to load from vocabulary_words
       const { count, error: countError } = await supabase
         .from('user_flashcard_session_items')
         .select('*', { count: 'exact', head: true })
@@ -458,17 +465,12 @@ export const useStore = create<AppState>((set, get) => ({
          }
       }
 
-      // If we still have 0 items (e.g. initialization logic ran but table was empty), use mock
-      if (allItems.length === 0) {
-          throw new Error("No items found in DB");
-      }
+      if (allItems.length === 0) throw new Error("No items found in DB");
 
       set({ flashcards: allItems });
 
     } catch (e: any) {
       console.warn("Falling back to Mock Flashcards due to error (or empty DB):", e.message);
-      
-      // FALLBACK: Generate FlashcardItems from SEED_VOCABULARY
       const mockItems: FlashcardItem[] = SEED_VOCABULARY.map((w, i) => ({
           id: `mock-flashcard-${i}`,
           word_id: w.id,
@@ -489,6 +491,7 @@ export const useStore = create<AppState>((set, get) => ({
 
     // DB Update
     if (!itemId.startsWith('mock-')) {
+        // Immediate persistence on swipe
         const { error } = await supabase
           .from('user_flashcard_session_items')
           .update({ session_state: state })
@@ -501,15 +504,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   resetFlashcards: async () => {
-     // Call Database Reset
      const { error } = await supabase.rpc('reset_flashcard_session');
-     
-     if (error) {
-         console.warn("Failed to reset via RPC (likely Mock Mode):", error.message);
-         // If RPC failed, likely we are in mock mode, so just reload session
-     } 
-     
-     // Reload fresh state (which will re-trigger fallback if needed)
+     if (error) console.warn("Failed to reset via RPC:", error.message);
      await get().loadFlashcardSession();
   }
 

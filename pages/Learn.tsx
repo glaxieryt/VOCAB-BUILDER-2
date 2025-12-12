@@ -162,6 +162,7 @@ export default function Learn() {
         }
 
         // 3. Generate Questions (AI or Fallback)
+        // Using AI is preferred, but fallback must be robust
         const aiQuestions = await generateAIQuiz(words);
         
         if (aiQuestions.length > 0) {
@@ -179,24 +180,37 @@ export default function Learn() {
           }
           setQueue([...intro, ...aiQuestions]);
         } else {
-            // SMART FALLBACK (Solves "Obvious Answers")
-            const basicExercises: Exercise[] = words.map((w, idx) => {
-                // Get 3 random distractors from SEED_VOCABULARY
-                // Shuffle entire vocab, filter out current word, take 3 definitions
+            // SMART FALLBACK (Solves "Obvious Answers" and "Repetition")
+            const basicExercises: Exercise[] = [];
+            const targetQuestions = 10;
+            
+            // Cycle through words to ensure we get 10 questions even if words array is small
+            let wordIndex = 0;
+            while (basicExercises.length < targetQuestions && words.length > 0) {
+                const w = words[wordIndex % words.length];
+                const qIdx = basicExercises.length;
+                
+                // Robust Distractor Generation: 
+                // Shuffle entire vocab, exclude current word, take 3 definitions
                 const distractors = shuffle(SEED_VOCABULARY)
                     .filter(sv => sv.id !== w.id && sv.definition !== w.definition)
                     .slice(0, 3)
                     .map(sv => sv.definition);
 
-                return {
-                    id: `basic-${w.id}-${idx}`,
+                // Fisher-Yates Shuffle for options to prevent "Always Option B"
+                const options = shuffle([w.definition, ...distractors]);
+
+                basicExercises.push({
+                    id: `basic-${w.id}-${qIdx}`,
                     type: 'mcq',
                     word: w,
                     questionText: `What is the definition of "${w.word}"?`,
-                    options: shuffle([w.definition, ...distractors]),
+                    options: options,
                     correctAnswer: w.definition
-                };
-            });
+                });
+                
+                wordIndex++;
+            }
             setQueue(basicExercises);
         }
       } catch (err) {
