@@ -1,0 +1,112 @@
+import React, { useState } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useStore } from '../store/useStore';
+
+export default function Auth() {
+  const [searchParams] = useSearchParams();
+  const isSignupInit = searchParams.get('mode') === 'signup';
+  const [isSignup, setIsSignup] = useState(isSignupInit);
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  
+  const { login, signup } = useStore();
+  const navigate = useNavigate();
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    
+    // Simulate API delay
+    setTimeout(() => {
+      if (isSignup) {
+        signup(username, email);
+      } else {
+        login(username);
+      }
+      setIsLoading(false);
+      navigate('/dashboard');
+    }, 1000);
+  };
+
+  return (
+    <div className="min-h-[90vh] flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-surface border border-white/10 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
+        {/* Background glow */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-primary/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none" />
+        
+        <div className="relative z-10">
+          <h2 className="text-3xl font-bold font-display mb-2">
+            {isSignup ? 'Create Account' : 'Welcome Back'}
+          </h2>
+          <p className="text-text-secondary mb-8">
+            {isSignup ? 'Start your vocabulary mastery journey' : 'Continue learning where you left off'}
+          </p>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Username</label>
+              <input
+                type="text"
+                required
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full bg-background border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors"
+                placeholder="johndoe"
+              />
+            </div>
+            
+            {isSignup && (
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-1">Email</label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-background border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors"
+                  placeholder="john@example.com"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Password</label>
+              <input
+                type="password"
+                required
+                className="w-full bg-background border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors"
+                placeholder="••••••••"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-primary hover:bg-primary/90 text-white font-bold py-3 rounded-lg mt-6 transition-all shadow-lg shadow-primary/25 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center"
+            >
+              {isLoading ? (
+                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              ) : (
+                isSignup ? 'Create Account' : 'Log In'
+              )}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center text-sm text-text-secondary">
+            {isSignup ? 'Already have an account?' : "Don't have an account?"}{' '}
+            <button 
+              onClick={() => setIsSignup(!isSignup)} 
+              className="text-primary font-bold hover:underline"
+            >
+              {isSignup ? 'Log In' : 'Sign Up'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

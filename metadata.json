@@ -1,0 +1,5 @@
+{
+  "name": "VocabMaster",
+  "description": "A gamified SAT vocabulary learning platform featuring spaced repetition, adaptive difficulty, and a modern card-based interface.",
+  "requestFramePermissions": []
+}
