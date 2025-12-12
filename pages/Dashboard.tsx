@@ -1,134 +1,104 @@
 import React from 'react';
 import { useStore } from '../store/useStore';
 import { Link } from 'react-router-dom';
-import { Lesson } from '../types';
 
-const LessonCard: React.FC<{ lesson: Lesson }> = ({ lesson }) => {
-  const isLocked = lesson.is_locked;
-  const isCompleted = lesson.completed;
-  const isCurrent = !isLocked && !isCompleted;
+// Icons components
+const FlashcardsIcon = () => (
+  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-primary">
+    <rect x="4" y="6" width="16" height="12" rx="2" fill="currentColor" fillOpacity="0.2" stroke="currentColor" strokeWidth="2"/>
+    <path d="M8 6V4H16V6" stroke="currentColor" strokeWidth="2"/>
+  </svg>
+);
 
-  return (
-    <Link 
-      to={isLocked ? '#' : `/learn/${lesson.id}`}
-      className={`
-        relative group rounded-2xl p-6 border transition-all duration-300
-        ${isLocked ? 'bg-surface/30 border-white/5 cursor-not-allowed grayscale opacity-60' : ''}
-        ${isCompleted ? 'bg-surface/50 border-success/30 hover:border-success/50' : ''}
-        ${isCurrent ? 'bg-surface border-primary hover:border-primary hover:shadow-[0_0_20px_rgba(91,79,255,0.2)] hover:-translate-y-1' : ''}
-        ${!isLocked && !isCompleted && !isCurrent ? 'bg-surface border-white/10 hover:border-white/30' : ''}
-      `}
-    >
-      <div className="flex justify-between items-start mb-4">
-        <div className="bg-background/50 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider text-text-secondary">
-          Lesson {lesson.unit}
-        </div>
-        {isCompleted && <div className="text-success text-xl">✅</div>}
-        {isLocked && <div className="text-text-disabled text-xl">🔒</div>}
-        {isCurrent && <div className="animate-bounce text-xl">⭐</div>}
-      </div>
+const LearnIcon = () => (
+  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-secondary">
+    <path d="M12 21C16.9706 21 21 16.9706 21 12C21 7.02944 16.9706 3 12 3C7.02944 3 3 7.02944 3 12C3 16.9706 7.02944 21 12 21Z" stroke="currentColor" strokeWidth="2" strokeDasharray="4 4"/>
+    <path d="M15 12L10 15V9L15 12Z" fill="currentColor"/>
+  </svg>
+);
 
-      <h3 className="text-xl font-bold mb-2">{lesson.title}</h3>
-      <p className="text-sm text-text-secondary mb-6">{lesson.word_count} words • ~10 mins</p>
+const TestIcon = () => (
+  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-primary">
+    <path d="M14 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V8L14 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M14 2V8H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M16 13H8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M16 17H8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M10 9H8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
 
-      {isCompleted ? (
-        <div className="flex items-center gap-1">
-           {Array.from({ length: 5 }).map((_, i) => (
-             <span key={i} className={`text-sm ${i < (lesson.stars || 0) ? 'text-warning' : 'text-gray-700'}`}>★</span>
-           ))}
-           <span className="ml-2 text-xs font-medium text-success">Completed</span>
-        </div>
-      ) : (
-        <div className={`
-          w-full py-2 rounded-lg text-center text-sm font-bold transition-colors
-          ${isCurrent ? 'bg-primary text-white' : 'bg-white/5 text-text-disabled'}
-        `}>
-          {isLocked ? `Unlock: ${lesson.required_xp} XP` : (isCurrent ? 'Start Lesson' : 'Start')}
-        </div>
+const MenuButton = ({ 
+  icon, 
+  title, 
+  to, 
+  isLocked = false,
+  isComingSoon = false 
+}: { 
+  icon: React.ReactNode, 
+  title: string, 
+  to: string, 
+  isLocked?: boolean,
+  isComingSoon?: boolean
+}) => (
+  <Link 
+    to={to}
+    className={`
+      flex items-center gap-6 p-6 rounded-2xl border transition-all duration-300 group
+      ${isLocked 
+        ? 'bg-surface/50 border-white/5 opacity-60 cursor-not-allowed' 
+        : 'bg-[#151336] border-white/5 hover:border-primary/50 hover:translate-x-1 hover:shadow-lg hover:shadow-primary/10'
+      }
+    `}
+  >
+    <div className={`
+      w-16 h-16 rounded-2xl flex items-center justify-center transition-colors
+      ${isLocked ? 'bg-white/5' : 'bg-white/5 group-hover:bg-white/10'}
+    `}>
+      {icon}
+    </div>
+    <div className="flex-1 flex items-center justify-between">
+      <span className="text-xl font-bold font-display tracking-wide">{title}</span>
+      {isComingSoon && !isLocked && (
+        <span className="text-xs bg-white/10 px-2 py-1 rounded text-text-secondary">Coming Soon</span>
       )}
-    </Link>
-  );
-};
+      {isLocked && (
+        <span className="text-xl">🔒</span>
+      )}
+    </div>
+  </Link>
+);
 
 export default function Dashboard() {
-  const { user, lessons } = useStore();
+  const { user } = useStore();
 
   if (!user) return null;
 
-  const totalLessons = lessons.length;
-  const completedLessons = lessons.filter(l => l.completed).length;
-  const progressPercentage = Math.round((completedLessons / totalLessons) * 100);
-
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 w-full">
-      <div className="grid lg:grid-cols-4 gap-8">
-        {/* Main Content */}
-        <div className="lg:col-span-3">
-          {/* Progress Banner */}
-          <div className="bg-surface rounded-2xl p-6 border border-white/10 mb-8 flex flex-col md:flex-row items-center justify-between gap-6">
-             <div className="flex-1 w-full">
-                <h2 className="text-2xl font-bold font-display mb-2">Current Progress</h2>
-                <div className="flex justify-between text-sm text-text-secondary mb-2">
-                  <span>Unit 1: Foundations</span>
-                  <span>{progressPercentage}% Complete</span>
-                </div>
-                <div className="h-3 bg-background rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-1000 ease-out"
-                    style={{ width: `${progressPercentage}%` }}
-                  />
-                </div>
-             </div>
-             <div className="bg-background/50 px-6 py-3 rounded-xl border border-white/5 text-center min-w-[150px]">
-                <div className="text-sm text-text-secondary mb-1">Daily Goal</div>
-                <div className="text-xl font-bold text-primary">35 / 50 XP</div>
-             </div>
-          </div>
+    <div className="max-w-2xl mx-auto px-4 py-12 flex flex-col gap-6">
+      <h1 className="text-3xl font-bold font-display mb-4 text-center">Dashboard</h1>
+      
+      {/* Flashcards */}
+      <MenuButton 
+        icon={<FlashcardsIcon />} 
+        title="Flashcards" 
+        to="/coming-soon?feature=Flashcards" 
+        isComingSoon={true}
+      />
 
-          {/* Learning Path */}
-          <div className="grid md:grid-cols-2 gap-4">
-            {lessons.map(lesson => (
-              <LessonCard key={lesson.id} lesson={lesson} />
-            ))}
-          </div>
-        </div>
+      {/* Learn - Points to the actual Learning Path */}
+      <MenuButton 
+        icon={<LearnIcon />} 
+        title="Learn" 
+        to="/learning-path" 
+      />
 
-        {/* Sidebar */}
-        <div className="hidden lg:block space-y-6">
-          <div className="bg-surface rounded-2xl p-6 border border-white/10 sticky top-24">
-            <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-              <span>📊</span> Statistics
-            </h3>
-            <div className="space-y-4">
-              <div className="flex justify-between items-center pb-3 border-b border-white/5">
-                <span className="text-text-secondary text-sm">Words Learned</span>
-                <span className="font-bold">{completedLessons * 5}</span>
-              </div>
-              <div className="flex justify-between items-center pb-3 border-b border-white/5">
-                <span className="text-text-secondary text-sm">Accuracy</span>
-                <span className="font-bold text-success">87%</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-text-secondary text-sm">Current Level</span>
-                <span className="font-bold text-secondary">Lvl {user.current_level}</span>
-              </div>
-            </div>
-
-            <div className="mt-8">
-               <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                <span>🏆</span> Achievements
-              </h3>
-              <div className="grid grid-cols-4 gap-2">
-                {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
-                  <div key={i} className={`aspect-square rounded-full flex items-center justify-center text-xl border ${i <= 3 ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-white/5 border-white/5 grayscale opacity-50'}`}>
-                    {['🔥', '⚡', '📚', '🎓', '⭐', '🎯', '👑', '💎'][i-1]}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Test */}
+      <MenuButton 
+        icon={<TestIcon />} 
+        title="Test" 
+        to="/coming-soon?feature=Unit Tests" 
+        isComingSoon={true}
+      />
     </div>
   );
 }

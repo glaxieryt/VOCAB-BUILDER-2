@@ -1,119 +1,386 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import { User, Lesson } from '../types';
-import { generateLessons } from '../lib/mockData';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { User, Unit, LessonNode } from '../types';
+import { seedDatabase } from '../lib/seeder';
+import { generateUnits } from '../lib/mockData';
 
 interface AppState {
   user: User | null;
-  lessons: Lesson[];
+  units: Unit[];
   isAuthenticated: boolean;
+  authError: string | null;
+  isLoading: boolean;
   
-  // Actions
-  login: (username: string) => void;
-  signup: (username: string, email: string) => void;
-  logout: () => void;
-  completeLesson: (lessonId: string, score: number, stars: number) => void;
-  initialize: () => void;
-  addXP: (amount: number) => void;
+  login: (username: string, password: string) => Promise<void>;
+  signup: (username: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+  setAuthError: (error: string) => void;
+  clearAuthError: () => void;
+  completeLesson: (lessonId: string, score: number, stars: number) => Promise<void>;
+  initialize: () => Promise<void>;
+  addXP: (amount: number) => Promise<void>;
+  fetchCourseData: () => Promise<void>;
 }
 
-export const useStore = create<AppState>()(
-  persist(
-    (set, get) => ({
-      user: null,
-      lessons: [],
-      isAuthenticated: false,
+export const useStore = create<AppState>((set, get) => ({
+  user: null,
+  units: [],
+  isAuthenticated: false,
+  authError: null,
+  isLoading: true,
 
-      initialize: () => {
-        const currentLessons = get().lessons;
-        if (currentLessons.length === 0) {
-          set({ lessons: generateLessons() });
-        }
-      },
+  setAuthError: (error: string) => set({ authError: error }),
+  clearAuthError: () => set({ authError: null }),
 
-      login: (username: string) => {
-        // Mock Login
-        set({
-          isAuthenticated: true,
-          user: {
-            id: 'user-1',
-            email: `${username.toLowerCase()}@example.com`,
-            username,
-            full_name: username,
-            current_streak: 5,
-            total_xp: 1250,
-            current_level: 3,
-            avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`
-          }
-        });
-      },
+  initialize: async () => {
+    set({ isLoading: true });
+    
+    // --- MOCK MODE INITIALIZATION ---
+    if (!isSupabaseConfigured) {
+      console.log("⚠️ App running in Mock Mode (No DB Connection)");
+      set({ units: generateUnits(), isLoading: false });
+      return;
+    }
+    // --------------------------------
 
-      signup: (username: string, email: string) => {
-        set({
-          isAuthenticated: true,
-          user: {
-            id: 'user-new',
-            email,
-            username,
-            full_name: username,
-            current_streak: 1,
-            total_xp: 0,
-            current_level: 1,
-            avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`
-          },
-          lessons: generateLessons() // Reset progress for new user
-        });
-      },
+    try {
+      // 1. Check if DB needs seeding
+      const { count, error: countError } = await supabase.from('units').select('*', { count: 'exact', head: true });
+      
+      if (countError) throw countError;
 
-      logout: () => set({ user: null, isAuthenticated: false }),
+      if (count === 0) {
+         await seedDatabase();
+      }
 
-      addXP: (amount: number) => {
-        const { user } = get();
-        if (user) {
+      // 2. Get User Session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      
+      if (session?.user) {
+        // 3. Fetch User Profile
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+
+        if (profile) {
           set({
+            isAuthenticated: true,
             user: {
-              ...user,
-              total_xp: user.total_xp + amount
+              id: profile.id,
+              email: session.user.email!,
+              username: profile.username,
+              full_name: profile.full_name,
+              current_streak: profile.current_streak,
+              total_xp: profile.total_xp,
+              current_level: profile.current_level,
+              avatar_url: profile.avatar_url
             }
           });
         }
-      },
+      }
 
-      completeLesson: (lessonId: string, score: number, stars: number) => {
-        const { lessons, user } = get();
-        const lessonIndex = lessons.findIndex(l => l.id === lessonId);
+      // 4. Load Course Data
+      await get().fetchCourseData();
+
+      // 5. Auth Listener
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'SIGNED_IN') {
+          get().initialize();
+        } else if (event === 'SIGNED_OUT') {
+          set({ user: null, isAuthenticated: false, units: [] });
+        }
+      });
+
+    } catch (error) {
+      console.error("Initialization error (falling back to mock data):", error);
+      set({ units: generateUnits(), authError: "Offline Mode: Using mock data" });
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  fetchCourseData: async () => {
+    const user = get().user;
+    
+    // --- MOCK MODE FETCH ---
+    if (!isSupabaseConfigured) {
+       if (get().units.length === 0) {
+         set({ units: generateUnits() });
+       }
+       return;
+    }
+    // ----------------------
+
+    try {
+      // A. Fetch Static Content
+      const { data: unitsDb, error: unitsError } = await supabase
+        .from('units')
+        .select('*, lessons(*)')
+        .order('sequence_number', { ascending: true });
+
+      if (unitsError) throw unitsError;
+      if (!unitsDb) return;
+
+      // B. Fetch User Progress (if logged in)
+      let lessonProgressMap: Record<number, any> = {};
+      let unitProgressMap: Record<number, any> = {};
+
+      if (user) {
+        const { data: lessonProgress } = await supabase
+          .from('user_lesson_progress')
+          .select('*')
+          .eq('user_id', user.id);
         
-        if (lessonIndex !== -1) {
-          const updatedLessons = [...lessons];
-          updatedLessons[lessonIndex] = {
-            ...updatedLessons[lessonIndex],
-            completed: true,
-            score,
-            stars
-          };
+        const { data: unitProgress } = await supabase
+          .from('user_unit_progress')
+          .select('*')
+          .eq('user_id', user.id);
 
-          // Unlock next lesson
-          if (lessonIndex + 1 < updatedLessons.length) {
-            updatedLessons[lessonIndex + 1] = {
-              ...updatedLessons[lessonIndex + 1],
-              is_locked: false
+        lessonProgress?.forEach(p => { lessonProgressMap[p.lesson_id] = p; });
+        unitProgress?.forEach(p => { unitProgressMap[p.unit_id] = p; });
+      }
+
+      // C. Merge and Construct State
+      const mergedUnits: Unit[] = unitsDb.map((u: any) => {
+         const sortedLessons = (u.lessons || []).sort((a: any, b: any) => a.lesson_number - b.lesson_number);
+         
+         let previousLessonCompleted = true; 
+
+         const mappedLessons: LessonNode[] = sortedLessons.map((l: any, index: number) => {
+            const progress = lessonProgressMap[l.id];
+            // Check 'is_completed' from DB column, default to false
+            const isCompleted = !!progress?.is_completed;
+            
+            let isLocked = true;
+            
+            if (u.sequence_number === 1 && l.lesson_number === 1) {
+               isLocked = false;
+            } else if (isCompleted) {
+               isLocked = false;
+            } else if (previousLessonCompleted) {
+               isLocked = false;
+            }
+
+            previousLessonCompleted = isCompleted;
+
+            return {
+               id: `unit-${u.sequence_number}-lesson-${l.lesson_number}`,
+               dbId: l.id,
+               unitId: u.sequence_number,
+               lessonNumber: l.lesson_number,
+               type: l.type,
+               isLocked: isLocked,
+               completed: isCompleted,
+               score: progress?.score,
+               stars: progress?.stars
             };
-          }
+         });
 
-          const xpGained = 50 + Math.floor(score / 2);
+         const uProgress = unitProgressMap[u.id];
+         const isLocked = u.sequence_number !== 1 && !uProgress?.is_unlocked; 
+         
+         return {
+           id: u.sequence_number,
+           dbId: u.id,
+           title: u.title,
+           lessons: mappedLessons,
+           isLocked: u.sequence_number === 1 ? false : isLocked
+         };
+      });
 
-          set({ 
-            lessons: updatedLessons,
-            user: user ? {
-              ...user,
-              total_xp: user.total_xp + xpGained
-            } : null
-          });
+      set({ units: mergedUnits });
+    } catch (err) {
+      console.error("Error fetching course data:", err);
+    }
+  },
+
+  login: async (username, password) => {
+    // --- MOCK LOGIN ---
+    if (!isSupabaseConfigured) {
+      console.log("Simulating Login (Mock Mode)");
+      set({ 
+        isAuthenticated: true, 
+        user: {
+           id: 'mock-user-123',
+           email: `${username}@example.com`,
+           username: username,
+           full_name: username,
+           current_streak: 1,
+           total_xp: 0,
+           current_level: 1,
+           avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`
+        },
+        authError: null
+      });
+      return;
+    }
+    // ------------------
+
+    const email = username.includes('@') ? username : `${username}@example.com`;
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (error) {
+      set({ authError: error.message });
+    } else {
+      set({ authError: null });
+    }
+  },
+
+  signup: async (username, password) => {
+     // --- MOCK SIGNUP ---
+     if (!isSupabaseConfigured) {
+      set({ authError: "Signup simulated! Please log in with the same credentials." });
+      return;
+    }
+    // -------------------
+
+    const email = `${username}@example.com`;
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          username: username,
+          full_name: username,
+          avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`
         }
       }
-    }),
-    {
-      name: 'vocab-master-storage',
+    });
+
+    if (error) {
+      set({ authError: error.message });
+    } else {
+      set({ authError: null });
+      if (!data.session) {
+         set({ authError: "Please check your email to confirm signup." });
+      }
     }
-  )
-);
+  },
+
+  logout: async () => {
+    if (isSupabaseConfigured) {
+      await supabase.auth.signOut();
+    }
+    set({ user: null, isAuthenticated: false, units: [] });
+    // Reload defaults for landing page
+    get().initialize();
+  },
+
+  completeLesson: async (lessonIdString, score, stars) => {
+    const { user, units } = get();
+    if (!user) return;
+
+    const parts = lessonIdString.split('-');
+    const unitSeq = parseInt(parts[1]);
+    const lessonNum = parseInt(parts[3]);
+
+    // --- OPTIMISTIC / MOCK UPDATE ---
+    let nextUnitUnlocked = false;
+
+    const updatedUnits = units.map(u => {
+       if (u.id === unitSeq) {
+           const updatedLessons = u.lessons.map(l => {
+              if (l.lessonNumber === lessonNum) {
+                 return { ...l, completed: true, score, stars };
+              }
+              if (l.lessonNumber === lessonNum + 1) {
+                  return { ...l, isLocked: false };
+              }
+              return l;
+           });
+           
+           if (lessonNum === 11 && score >= 75) {
+               nextUnitUnlocked = true;
+           }
+
+           return { ...u, lessons: updatedLessons };
+       }
+       return u;
+    });
+
+    if (nextUnitUnlocked) {
+        const nextUnitIndex = updatedUnits.findIndex(u => u.id === unitSeq + 1);
+        if (nextUnitIndex !== -1) {
+            updatedUnits[nextUnitIndex].isLocked = false;
+            if (updatedUnits[nextUnitIndex].lessons.length > 0) {
+                updatedUnits[nextUnitIndex].lessons[0].isLocked = false;
+            }
+        }
+    }
+
+    set({ units: updatedUnits });
+    await get().addXP(10 + (stars * 5));
+
+    // --- REAL DB UPDATE ---
+    if (!isSupabaseConfigured) return;
+
+    const unit = units.find(u => u.id === unitSeq);
+    const lesson = unit?.lessons.find(l => l.lessonNumber === lessonNum);
+
+    if (!lesson || !(lesson as any).dbId) return;
+
+    const dbLessonId = (lesson as any).dbId;
+    const dbUnitId = (unit as any).dbId;
+
+    // Use 'is_completed' column as requested
+    const { error } = await supabase
+      .from('user_lesson_progress')
+      .upsert({
+        user_id: user.id,
+        lesson_id: dbLessonId,
+        is_completed: true, 
+        score,
+        stars
+      }, { onConflict: 'user_id, lesson_id' });
+
+    if (error) console.error("Error saving progress:", error);
+
+    if (lesson.type === 'test' && score >= 75) {
+       const nextUnitSeq = unitSeq + 1;
+       const { data: nextUnitData } = await supabase
+         .from('units')
+         .select('id')
+         .eq('sequence_number', nextUnitSeq)
+         .single();
+       
+       if (nextUnitData) {
+         await supabase
+           .from('user_unit_progress')
+           .upsert({
+             user_id: user.id,
+             unit_id: nextUnitData.id,
+             is_unlocked: true
+           }, { onConflict: 'user_id, unit_id' });
+       }
+       
+       await supabase
+         .from('user_unit_progress')
+         .upsert({
+             user_id: user.id,
+             unit_id: dbUnitId,
+             is_completed: true
+         }, { onConflict: 'user_id, unit_id' });
+    }
+  },
+
+  addXP: async (amount) => {
+    const { user } = get();
+    if (!user) return;
+
+    const newXP = user.total_xp + amount;
+    set({ user: { ...user, total_xp: newXP } });
+
+    if (isSupabaseConfigured) {
+      await supabase
+        .from('profiles')
+        .update({ total_xp: newXP })
+        .eq('id', user.id);
+    }
+  }
+}));

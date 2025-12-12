@@ -16,43 +16,37 @@ export interface VocabularyWord {
   part_of_speech: string;
   example_sentence: string;
   synonyms: string[];
-  difficulty_level: 1 | 2 | 3 | 4 | 5;
+  difficulty_level: number;
+  unit_number: number;
 }
 
-export interface Lesson {
+export type LessonType = 'intro' | 'practice' | 'test';
+
+export interface LessonNode {
   id: string;
-  title: string;
-  section: number;
-  unit: number;
-  word_count: number;
-  required_xp: number;
-  is_locked: boolean;
+  unitId: number;
+  lessonNumber: number; // 1-11
+  type: LessonType;
+  isLocked: boolean;
   completed: boolean;
   score?: number;
   stars?: number;
 }
 
-export enum QuestionType {
-  SCAFFOLDED = 'scaffolded',
-  MCQ = 'mcq',
-  CLOZE = 'cloze',
-  TYPING = 'typing'
+export interface Unit {
+  id: number;
+  title: string;
+  lessons: LessonNode[];
+  isLocked: boolean;
 }
 
-export interface Question {
+export type ExerciseType = 'scaffolded' | 'mcq' | 'cloze';
+
+export interface Exercise {
   id: string;
-  word_id: string;
-  type: QuestionType;
-  prompt: string;
-  correct_answer: string;
-  options?: string[]; // For MCQ
-  context?: string; // For Cloze/Scaffolded
-  word_data: VocabularyWord;
-}
-
-export interface ReviewItem {
-  wordId: string;
-  nextReview: number; // Timestamp
-  interval: number; // Days
-  easeFactor: number;
+  type: ExerciseType;
+  word: VocabularyWord;
+  questionText?: string; 
+  options?: string[]; 
+  correctAnswer: string;
 }

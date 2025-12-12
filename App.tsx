@@ -2,8 +2,10 @@ import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Landing from './pages/Landing';
 import Dashboard from './pages/Dashboard';
+import LearningPath from './pages/LearningPath';
 import Learn from './pages/Learn';
 import Auth from './pages/Auth';
+import ComingSoon from './pages/ComingSoon';
 import Navbar from './components/Navbar';
 import { useStore } from './store/useStore';
 
@@ -46,10 +48,26 @@ export default function App() {
               } 
             />
             <Route 
+              path="/learning-path" 
+              element={
+                <PrivateRoute>
+                  <LearningPath />
+                </PrivateRoute>
+              } 
+            />
+            <Route 
               path="/learn/:lessonId" 
               element={
                 <PrivateRoute>
                   <Learn />
+                </PrivateRoute>
+              } 
+            />
+            <Route 
+              path="/coming-soon" 
+              element={
+                <PrivateRoute>
+                  <ComingSoon />
                 </PrivateRoute>
               } 
             />

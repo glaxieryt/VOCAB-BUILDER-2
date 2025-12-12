@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 
@@ -7,26 +7,52 @@ export default function Auth() {
   const isSignupInit = searchParams.get('mode') === 'signup';
   const [isSignup, setIsSignup] = useState(isSignupInit);
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   
-  const { login, signup } = useStore();
+  const { login, signup, authError, setAuthError, clearAuthError, isAuthenticated } = useStore();
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    clearAuthError();
+    // Reset fields on mode switch
+    setPassword('');
+    setConfirmPassword('');
+  }, [isSignup, clearAuthError]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/dashboard');
+    }
+  }, [isAuthenticated, navigate]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (isSignup && password !== confirmPassword) {
+      setAuthError("Passwords do not match.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setAuthError("Password must be at least 6 characters.");
+      return;
+    }
+
     setIsLoading(true);
     
-    // Simulate API delay
-    setTimeout(() => {
+    try {
       if (isSignup) {
-        signup(username, email);
+        await signup(username, password);
       } else {
-        login(username);
+        await login(username, password);
       }
+    } catch (err) {
+      // Errors handled in store
+    } finally {
       setIsLoading(false);
-      navigate('/dashboard');
-    }, 1000);
+    }
   };
 
   return (
@@ -43,6 +69,13 @@ export default function Auth() {
             {isSignup ? 'Start your vocabulary mastery journey' : 'Continue learning where you left off'}
           </p>
 
+          {authError && (
+            <div className="mb-6 p-4 bg-error/10 border border-error/50 rounded-lg flex items-start gap-3">
+              <span className="text-xl">⚠️</span>
+              <p className="text-sm text-error font-medium pt-0.5">{authError}</p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-1">Username</label>
@@ -56,29 +89,31 @@ export default function Auth() {
               />
             </div>
             
-            {isSignup && (
-              <div>
-                <label className="block text-sm font-medium text-text-secondary mb-1">Email</label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-background border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors"
-                  placeholder="john@example.com"
-                />
-              </div>
-            )}
-
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-1">Password</label>
               <input
                 type="password"
                 required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-background border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors"
                 placeholder="••••••••"
               />
             </div>
+
+            {isSignup && (
+              <div className="animate-float" style={{ animation: 'none' }}> {/* Prevents layout shift jank */}
+                <label className="block text-sm font-medium text-text-secondary mb-1">Confirm Password</label>
+                <input
+                  type="password"
+                  required
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className={`w-full bg-background border rounded-lg px-4 py-3 text-white focus:outline-none transition-colors ${password && confirmPassword && password !== confirmPassword ? 'border-error focus:border-error' : 'border-white/10 focus:border-primary'}`}
+                  placeholder="••••••••"
+                />
+              </div>
+            )}
 
             <button
               type="submit"
@@ -99,7 +134,10 @@ export default function Auth() {
           <div className="mt-6 text-center text-sm text-text-secondary">
             {isSignup ? 'Already have an account?' : "Don't have an account?"}{' '}
             <button 
-              onClick={() => setIsSignup(!isSignup)} 
+              onClick={() => {
+                setIsSignup(!isSignup);
+                clearAuthError();
+              }} 
               className="text-primary font-bold hover:underline"
             >
               {isSignup ? 'Log In' : 'Sign Up'}

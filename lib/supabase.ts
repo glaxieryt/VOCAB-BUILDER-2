@@ -1,9 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 
-// NOTE: These environment variables would be set in a real deployment
-// For this demo, we are using the Mock Store in src/store/useStore.ts 
-// to simulate backend behavior without a live database connection.
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || 'https://mock.supabase.co';
-const supabaseKey = process.env.REACT_APP_SUPABASE_ANON_KEY || 'mock-key';
+// Safely access environment variables to prevent runtime crashes
+// @ts-ignore
+const env = (typeof import.meta !== 'undefined') ? import.meta.env : null;
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// @ts-ignore
+const supabaseUrl = (env && env.VITE_SUPABASE_URL) || '';
+// @ts-ignore
+const supabaseKey = (env && env.VITE_SUPABASE_ANON_KEY) || '';
+
+// Check if we are using real credentials or placeholders
+export const isSupabaseConfigured = supabaseUrl && supabaseKey && supabaseUrl !== 'https://placeholder.supabase.co';
+
+if (!isSupabaseConfigured) {
+  console.warn("Supabase credentials missing! App running in Mock Mode. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to use a real DB.");
+}
+
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co', 
+  supabaseKey || 'placeholder'
+);
