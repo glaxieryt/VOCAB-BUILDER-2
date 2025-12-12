@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { User, Unit, LessonNode, FlashcardItem, FlashcardState } from '../types';
 import { seedDatabase } from '../lib/seeder';
-import { generateUnits, SEED_VOCABULARY } from '../lib/mockData';
+import { generateUnits, SEED_VOCABULARY, getWordByGlobalIndex } from '../lib/mockData';
 
 interface AppState {
   user: User | null;
@@ -401,14 +401,21 @@ export const useStore = create<AppState>((set, get) => ({
     const { user } = get();
     if (!user) return;
 
-    // Mock Mode
+    // Mock Mode: LOAD ALL 1161 WORDS
     if (!isSupabaseConfigured) {
-      const mockSession = SEED_VOCABULARY.map(word => ({
-        id: `card-${word.id}`,
-        word_id: word.id,
-        word: word,
-        session_state: 'pending' as FlashcardState
-      }));
+      const mockSession: FlashcardItem[] = [];
+      // Generate exactly 1161 items as requested
+      const TOTAL_WORDS = 1161; 
+      
+      for (let i = 0; i < TOTAL_WORDS; i++) {
+        const word = getWordByGlobalIndex(i);
+        mockSession.push({
+          id: `card-${word.id}`,
+          word_id: word.id,
+          word: word,
+          session_state: 'pending' as FlashcardState
+        });
+      }
       set({ flashcards: mockSession });
       return;
     }
@@ -489,6 +496,24 @@ export const useStore = create<AppState>((set, get) => ({
      const { user } = get();
      if (!user) return;
 
+    // Handle Mock Mode Reset
+    if (!isSupabaseConfigured) {
+      const mockSession: FlashcardItem[] = [];
+      const TOTAL_WORDS = 1161; 
+      for (let i = 0; i < TOTAL_WORDS; i++) {
+        const word = getWordByGlobalIndex(i);
+        mockSession.push({
+          id: `card-${word.id}`,
+          word_id: word.id,
+          word: word,
+          session_state: 'pending' as FlashcardState
+        });
+      }
+      set({ flashcards: mockSession });
+      return;
+    }
+
+    // Handle Real DB Reset
      // 1. Optimistic Update: INSTANTLY set all to pending
      set(prev => ({
        flashcards: prev.flashcards.map(item => ({ ...item, session_state: 'pending' }))

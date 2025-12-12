@@ -1,9 +1,24 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { VocabularyWord, Exercise } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Lazy initialization to prevent top-level crash
+let ai: GoogleGenAI | null = null;
+
+const getAI = () => {
+  if (!ai) {
+    if (!process.env.API_KEY) {
+      console.warn("Google API Key missing. AI features will be disabled.");
+      return null;
+    }
+    ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  }
+  return ai;
+};
 
 export async function generateAIQuiz(words: VocabularyWord[]): Promise<Exercise[]> {
+  const client = getAI();
+  if (!client) return [];
+
   const wordsList = words.map(w => `${w.word}: ${w.definition} (${w.part_of_speech})`).join('\n');
 
   const prompt = `
@@ -22,7 +37,7 @@ export async function generateAIQuiz(words: VocabularyWord[]): Promise<Exercise[
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await client.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
       config: {

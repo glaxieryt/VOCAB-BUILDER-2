@@ -48,7 +48,8 @@ export const SEED_VOCABULARY: VocabularyWord[] = [
 ];
 
 // Helper to retrieve a word by its global index (0-1199)
-const getWordByGlobalIndex = (index: number): VocabularyWord => {
+// EXPORTED NOW SO USESTORE CAN USE IT
+export const getWordByGlobalIndex = (index: number): VocabularyWord => {
   if (index < SEED_VOCABULARY.length) {
     return SEED_VOCABULARY[index];
   }
