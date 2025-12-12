@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
-import { getWordsForLesson, generateExercisesForLesson } from '../lib/mockData';
 import { generateAIQuiz } from '../lib/ai';
-import { Exercise } from '../types';
+import { Exercise, VocabularyWord } from '../types';
+import { supabase } from '../lib/supabase';
 
 // --- Sound Effects Utility ---
 const playSound = (type: 'correct' | 'incorrect') => {
@@ -35,7 +35,6 @@ const playSound = (type: 'correct' | 'incorrect') => {
 
 // --- Sub-Components ---
 
-// 1. Scaffolded View (Intro)
 const ScaffoldedView = ({ exercise, onAnswer }: { exercise: Exercise, onAnswer: (ans: string) => void }) => {
   const [showHint, setShowHint] = useState(false);
   const parts = exercise.word.example_sentence.split(new RegExp(`(${exercise.word.word})`, 'gi'));
@@ -81,7 +80,6 @@ const ScaffoldedView = ({ exercise, onAnswer }: { exercise: Exercise, onAnswer: 
   );
 };
 
-// 2. MCQ View
 const MCQView = ({ exercise, onAnswer, disabled }: { exercise: Exercise, onAnswer: (ans: string) => void, disabled: boolean }) => {
   return (
     <div className="w-full max-w-lg mx-auto">
@@ -109,7 +107,7 @@ const MCQView = ({ exercise, onAnswer, disabled }: { exercise: Exercise, onAnswe
 export default function Learn() {
   const { lessonId } = useParams<{ lessonId: string }>();
   const navigate = useNavigate();
-  const { completeLesson, addXP } = useStore();
+  const { completeLesson, addXP, units } = useStore();
   
   const [queue, setQueue] = useState<Exercise[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -124,22 +122,45 @@ export default function Learn() {
       if (!lessonId) return;
       setLoading(true);
 
-      // 1. Get the words for this lesson
-      const words = getWordsForLesson(lessonId);
-
-      // 2. Try to generate with AI
       try {
+        // 1. Find DB ID for this lesson
+        // lessonId format: unit-X-lesson-Y
+        const parts = lessonId.split('-');
+        const unitSeq = parseInt(parts[1]);
+        const lessonNum = parseInt(parts[3]);
+
+        const unit = units.find(u => u.id === unitSeq);
+        const lesson = unit?.lessons.find(l => l.lessonNumber === lessonNum);
+
+        if (!lesson || !(lesson as any).dbId) {
+            console.error("Lesson not found in store");
+            setLoading(false);
+            return;
+        }
+
+        // 2. Fetch Words from Supabase (REAL DATA)
+        const { data: wordsData, error } = await supabase
+          .from('vocabulary_words')
+          .select('*')
+          .eq('lesson_id', (lesson as any).dbId);
+
+        if (error) throw error;
+        
+        const words = wordsData as VocabularyWord[];
+        
+        if (!words || words.length === 0) {
+           console.warn("No words found for this lesson.");
+           setLoading(false);
+           return;
+        }
+
+        // 3. Generate Questions (AI or Fallback)
         const aiQuestions = await generateAIQuiz(words);
         
         if (aiQuestions.length > 0) {
-          // Add scaffolding intro if it's not a test
           const intro: Exercise[] = [];
-          if (!lessonId.includes('lesson-11')) {
-            const parts = lessonId.split('-'); 
-            const unitNum = parseInt(parts[1]);
-            const lessonNum = parseInt(parts[3]);
-            // Only add intro for the 'new' word of this lesson
-            // Logic assumes first word in list is the new one for non-test
+          if (lessonNum !== 11) {
+            // Intro for the first word in the list (assuming 1 new word per lesson)
             if (words.length > 0) {
               intro.push({
                  id: `scaffold-${words[0].id}`,
@@ -151,20 +172,28 @@ export default function Learn() {
           }
           setQueue([...intro, ...aiQuestions]);
         } else {
-          // Fallback to mock if AI fails
-          const fallback = generateExercisesForLesson(lessonId);
-          setQueue(fallback);
+            // Basic fallback if AI fails: Simple definitions
+            const basicExercises: Exercise[] = words.map((w, idx) => ({
+                id: `basic-${w.id}-${idx}`,
+                type: 'mcq',
+                word: w,
+                questionText: `What is the definition of "${w.word}"?`,
+                options: [w.definition, 'Incorrect Def 1', 'Incorrect Def 2', 'Incorrect Def 3'].sort(() => Math.random() - 0.5),
+                correctAnswer: w.definition
+            }));
+            setQueue(basicExercises);
         }
       } catch (err) {
         console.error("Error generating lesson:", err);
-        setQueue(generateExercisesForLesson(lessonId));
       } finally {
         setLoading(false);
       }
     };
 
-    fetchExercises();
-  }, [lessonId]);
+    if (units.length > 0) {
+        fetchExercises();
+    }
+  }, [lessonId, units]);
 
   const handleAnswer = (answer: string) => {
     const currentEx = queue[currentIndex];
@@ -181,14 +210,13 @@ export default function Learn() {
       playSound('correct');
       if (!mistakes.includes(currentEx.id) && currentEx.type !== 'scaffolded') {
         setSessionScore(prev => ({ ...prev, correct: prev.correct + 1 }));
-        addXP(10);
+        // XP added at end of lesson
       }
     } else {
       setFeedback('incorrect');
       playSound('incorrect');
       if (!mistakes.includes(currentEx.id)) {
         setMistakes(prev => [...prev, currentEx.id]);
-        // Simple retry mechanism
         if (!lessonId?.includes('lesson-11')) {
            setQueue(prev => [...prev, { ...currentEx, id: `${currentEx.id}-retry` }]);
         }
@@ -229,14 +257,13 @@ export default function Learn() {
     if (lessonId) {
       await completeLesson(lessonId, finalAccuracy, stars);
     }
-    // Updated Navigation: Go to Learning Path (Map) instead of Dashboard
     navigate('/learning-path'); 
   };
 
   if (loading) return (
     <div className="flex h-screen items-center justify-center flex-col gap-4">
       <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-      <div className="text-xl font-bold animate-pulse">Generating AI Lesson...</div>
+      <div className="text-xl font-bold animate-pulse">Generating Lesson...</div>
     </div>
   );
 
@@ -272,7 +299,6 @@ export default function Learn() {
       <main className="flex-1 flex flex-col items-center justify-center p-4 w-full max-w-4xl mx-auto relative z-0">
         <div className="w-full">
            {currentEx.type === 'scaffolded' && <ScaffoldedView exercise={currentEx} onAnswer={handleAnswer} />}
-           {/* Reuse MCQ view for AI questions as they are formatted as MCQs */}
            {currentEx.type === 'mcq' && <MCQView exercise={currentEx} onAnswer={handleAnswer} disabled={feedback !== null} />}
            {currentEx.type === 'cloze' && <MCQView exercise={currentEx} onAnswer={handleAnswer} disabled={feedback !== null} />}
         </div>

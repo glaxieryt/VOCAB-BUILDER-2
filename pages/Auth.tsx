@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
+import { supabase } from '../lib/supabase';
 
 export default function Auth() {
   const location = useLocation();
@@ -11,47 +12,106 @@ export default function Auth() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [localError, setLocalError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   
-  const { login, signup, authError, setAuthError, clearAuthError, isAuthenticated } = useStore();
+  const { isAuthenticated, clearAuthError, initialize } = useStore();
 
   useEffect(() => {
+    setLocalError(null);
     clearAuthError();
-    // Reset fields on mode switch
     setPassword('');
     setConfirmPassword('');
   }, [isSignup, clearAuthError]);
 
   useEffect(() => {
     if (isAuthenticated) {
-      navigate('/dashboard');
+      navigate('/dashboard', { replace: true });
     }
   }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    setLocalError(null);
+    setIsLoading(true);
+
+    // Validation
     if (isSignup && password !== confirmPassword) {
-      setAuthError("Passwords do not match.");
+      setLocalError("Passwords do not match.");
+      setIsLoading(false);
       return;
     }
 
     if (password.length < 6) {
-      setAuthError("Password must be at least 6 characters.");
+      setLocalError("Password must be at least 6 characters.");
+      setIsLoading(false);
       return;
     }
 
-    setIsLoading(true);
-    
+    const email = username.includes('@') ? username : `${username}@example.com`;
+
     try {
       if (isSignup) {
-        await signup(username, password);
+        // --- SIGNUP LOGIC ---
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              username: username,
+              full_name: username,
+              avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`
+            }
+          }
+        });
+
+        if (error) {
+          console.error("Signup failed:", error.message);
+          setLocalError(error.message);
+          setIsLoading(false);
+          return;
+        }
+
+        if (data.session) {
+          await initialize(); // Sync store with new session
+          navigate('/dashboard', { replace: true });
+        } else {
+          setLocalError("Please check your email to confirm signup.");
+          setIsLoading(false);
+        }
+
       } else {
-        await login(username, password);
+        // --- LOGIN LOGIC (STRICT) ---
+        console.log("Attempting login..."); 
+
+        // 1. AWAIT the response.
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        // 2. CHECK FOR ERROR. If error exists, STOP.
+        if (error) {
+          console.error("Login Error:", error.message);
+          setLocalError("Invalid credentials. Please try again.");
+          setIsLoading(false);
+          return; // <--- CRITICAL: Stops flow.
+        }
+
+        // 3. SUCCESS. Verify session.
+        if (data?.session) {
+          console.log("Login success, redirecting...");
+          await initialize(); // Sync store with new session
+          navigate('/dashboard', { replace: true });
+        } else {
+          setLocalError("Something went wrong. No session created.");
+          setIsLoading(false);
+        }
       }
-    } catch (err) {
-      // Errors handled in store
-    } finally {
+
+    } catch (err: any) {
+      console.error("Auth Error:", err);
+      setLocalError(err.message || "An unexpected error occurred.");
       setIsLoading(false);
     }
   };
@@ -70,13 +130,13 @@ export default function Auth() {
             {isSignup ? 'Start your vocabulary mastery journey' : 'Continue learning where you left off'}
           </p>
 
-          {authError && (
+          {localError && (
             <div className="mb-6 p-4 bg-error/10 border border-error/50 rounded-lg flex items-start gap-3">
               <span className="text-xl">⚠️</span>
-              <p className="text-sm text-error font-medium pt-0.5">{authError}</p>
+              <p className="text-sm text-error font-medium pt-0.5">{localError}</p>
             </div>
           )}
-
+          
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-1">Username</label>
@@ -103,7 +163,7 @@ export default function Auth() {
             </div>
 
             {isSignup && (
-              <div className="animate-float" style={{ animation: 'none' }}> {/* Prevents layout shift jank */}
+              <div className="animate-float" style={{ animation: 'none' }}>
                 <label className="block text-sm font-medium text-text-secondary mb-1">Confirm Password</label>
                 <input
                   type="password"
@@ -137,7 +197,7 @@ export default function Auth() {
             <button 
               onClick={() => {
                 setIsSignup(!isSignup);
-                clearAuthError();
+                setLocalError(null);
               }} 
               className="text-primary font-bold hover:underline"
             >
