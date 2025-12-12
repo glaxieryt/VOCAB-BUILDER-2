@@ -41,11 +41,17 @@ export const useStore = create<AppState>((set, get) => ({
   initialize: async () => {
     set({ isLoading: true });
     
-    // Strict check: We rely on lib/supabase.ts to throw if keys are missing.
-    // Here we just proceed assuming connection is configured.
+    // STRICT MODE: No keys = Error, no mock fallback.
+    if (!isSupabaseConfigured) {
+       set({ 
+         isLoading: false, 
+         authError: "Database connection missing. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY." 
+       });
+       return;
+    }
 
     try {
-      // 1. Check connection & Seed if necessary
+      // 1. Check connection & Seed if necessary (Auto-seed real DB if empty)
       const { count, error: countError } = await supabase.from('units').select('*', { count: 'exact', head: true });
       
       if (countError) {
@@ -69,7 +75,7 @@ export const useStore = create<AppState>((set, get) => ({
           .eq('id', session.user.id)
           .single();
 
-        if (profileError && profileError.code !== 'PGRST116') { // Ignore 'not found' if it's just missing profile
+        if (profileError && profileError.code !== 'PGRST116') {
             console.error("Profile fetch error:", profileError.message);
         }
 
@@ -106,7 +112,6 @@ export const useStore = create<AppState>((set, get) => ({
       const msg = error.message || "Unknown error occurred";
       console.error("Initialization error:", msg);
       
-      // If table doesn't exist
       if (msg.includes('relation') && msg.includes('does not exist')) {
         set({ authError: "Database setup incomplete. Tables missing." });
       } else {
@@ -121,6 +126,7 @@ export const useStore = create<AppState>((set, get) => ({
     const user = get().user;
     
     try {
+      // Fetch Units and Nested Lessons
       const { data: unitsDb, error: unitsError } = await supabase
         .from('units')
         .select('*, lessons(*)')
@@ -133,6 +139,7 @@ export const useStore = create<AppState>((set, get) => ({
       let unitProgressMap: Record<number, any> = {};
 
       if (user) {
+        // Fetch User Progress
         const { data: lessonProgress } = await supabase
           .from('user_lesson_progress')
           .select('*')
@@ -147,20 +154,26 @@ export const useStore = create<AppState>((set, get) => ({
         unitProgress?.forEach(p => { unitProgressMap[p.unit_id] = p; });
       }
 
+      // Merge DB Data with User Progress
       const mergedUnits: Unit[] = unitsDb.map((u: any) => {
          const sortedLessons = (u.lessons || []).sort((a: any, b: any) => a.lesson_number - b.lesson_number);
          let previousLessonCompleted = true; 
+         
          const mappedLessons: LessonNode[] = sortedLessons.map((l: any) => {
             const progress = lessonProgressMap[l.id];
             const isCompleted = !!progress?.is_completed;
             let isLocked = true;
+            
+            // Logic: Unlock if it's Lesson 1.1 OR if completed OR if previous is completed
             if (u.sequence_number === 1 && l.lesson_number === 1) isLocked = false;
             else if (isCompleted) isLocked = false;
             else if (previousLessonCompleted) isLocked = false;
+            
             previousLessonCompleted = isCompleted;
+            
             return {
                id: `unit-${u.sequence_number}-lesson-${l.lesson_number}`,
-               dbId: l.id,
+               dbId: l.id, // CRITICAL: Database ID for linking to questions
                unitId: u.sequence_number,
                lessonNumber: l.lesson_number,
                type: l.type,
@@ -170,8 +183,11 @@ export const useStore = create<AppState>((set, get) => ({
                stars: progress?.stars
             };
          });
+
          const uProgress = unitProgressMap[u.id];
+         // Logic: Unlock unit if it's Unit 1 OR if unlocked in DB
          const isLocked = u.sequence_number !== 1 && !uProgress?.is_unlocked; 
+         
          return {
            id: u.sequence_number,
            dbId: u.id,
@@ -188,28 +204,26 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   login: async (username, password) => {
-     // Main logic handled in Auth.tsx
+     // REAL AUTH ONLY
      const email = username.includes('@') ? username : `${username}@example.com`;
      const { error } = await supabase.auth.signInWithPassword({ email, password });
      if (error) throw error;
   },
 
   signup: async (username, password) => {
-     // Main logic handled in Auth.tsx
+     // REAL AUTH ONLY is handled in Auth.tsx via supabase.auth.signUp
+     // This method is a placeholder if needed, but we mostly use Auth.tsx logic
   },
 
   logout: async () => {
     await supabase.auth.signOut();
     set({ user: null, isAuthenticated: false, units: [] });
-    get().initialize();
+    set({ isLoading: false });
   },
 
   completeLesson: async (lessonIdString, score, stars) => {
     const { user, units } = get();
-    if (!user) {
-        console.error("Cannot complete lesson: User is not logged in");
-        return;
-    }
+    if (!user) return;
 
     const parts = lessonIdString.split('-');
     const unitSeq = parseInt(parts[1]);
@@ -218,10 +232,9 @@ export const useStore = create<AppState>((set, get) => ({
     // 1. Calculate XP and Streak Update
     const xpEarned = 10 + (stars * 5);
     const newXP = user.total_xp + xpEarned;
-    const newStreak = user.current_streak + 1;
+    const newStreak = user.current_streak + 1; // Simplified streak logic for now
 
-    // 2. Optimistic Update (Local State)
-    let nextUnitUnlocked = false;
+    // 2. Optimistic Update
     const updatedUnits = units.map(u => {
        if (u.id === unitSeq) {
            const updatedLessons = u.lessons.map(l => {
@@ -233,28 +246,17 @@ export const useStore = create<AppState>((set, get) => ({
               }
               return l;
            });
-           if (lessonNum === 11 && score >= 75) nextUnitUnlocked = true;
            return { ...u, lessons: updatedLessons };
        }
        return u;
     });
-
-    if (nextUnitUnlocked) {
-        const nextUnitIndex = updatedUnits.findIndex(u => u.id === unitSeq + 1);
-        if (nextUnitIndex !== -1) {
-            updatedUnits[nextUnitIndex].isLocked = false;
-            if (updatedUnits[nextUnitIndex].lessons.length > 0) {
-                updatedUnits[nextUnitIndex].lessons[0].isLocked = false;
-            }
-        }
-    }
 
     set({ 
         units: updatedUnits,
         user: { ...user, total_xp: newXP, current_streak: newStreak }
     });
 
-    // 3. Database Updates
+    // 3. Database Updates (Critical)
     const unit = units.find(u => u.id === unitSeq);
     const lesson = unit?.lessons.find(l => l.lessonNumber === lessonNum);
 
@@ -266,13 +268,13 @@ export const useStore = create<AppState>((set, get) => ({
     const dbLessonId = (lesson as any).dbId;
     const dbUnitId = (unit as any).dbId;
 
-    // A. Update Profile (XP & Streak)
+    // Update Profile
     await supabase.from('profiles').update({
         total_xp: newXP,
         current_streak: newStreak
     }).eq('id', user.id);
 
-    // B. Update Lesson Progress
+    // Update Lesson Progress
     const { error: lessonError } = await supabase
       .from('user_lesson_progress')
       .upsert({
@@ -285,7 +287,7 @@ export const useStore = create<AppState>((set, get) => ({
 
     if (lessonError) console.error("Error saving lesson progress:", lessonError.message);
 
-    // C. Handle Unit Test Completion (Unlock next unit)
+    // If Test Passed, Unlock Next Unit
     if (lesson.type === 'test' && score >= 75) {
        const nextUnitSeq = unitSeq + 1;
        const { data: nextUnitData } = await supabase
@@ -315,7 +317,6 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   addXP: async (amount) => {
-    // Legacy helper, main logic moved to completeLesson
     const { user } = get();
     if (!user) return;
     const newXP = user.total_xp + amount;
@@ -328,6 +329,8 @@ export const useStore = create<AppState>((set, get) => ({
     if (!user) return; 
 
     try {
+      // 1. Check if we need to initialize/reset the session
+      // If the user has NO items in the session table, call the RPC to load from vocabulary_words
       const { count, error: countError } = await supabase
         .from('user_flashcard_session_items')
         .select('*', { count: 'exact', head: true })
@@ -335,14 +338,13 @@ export const useStore = create<AppState>((set, get) => ({
 
       if (countError) throw countError;
 
-      // Ensure full deck is initialized via RPC if counts are suspicious (empty or just the 20 demo words)
-      // Increasing the threshold to 100 to catch the demo state.
-      if (count === null || count < 100) {
-        console.log("Deck incomplete (count: " + count + "). Initializing full vocabulary via RPC...");
+      if (count === 0) {
+        console.log("Initializing Flashcard Session...");
         const { error: rpcError } = await supabase.rpc('reset_flashcard_session');
         if (rpcError) throw rpcError;
       }
 
+      // 2. Fetch Flashcards
       let allItems: FlashcardItem[] = [];
       let page = 0;
       const pageSize = 1000;
@@ -389,6 +391,7 @@ export const useStore = create<AppState>((set, get) => ({
       )
     }));
 
+    // DB Update
     const { error } = await supabase
       .from('user_flashcard_session_items')
       .update({ session_state: state })
@@ -400,17 +403,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   resetFlashcards: async () => {
-     const { user } = get();
-     if (!user) return;
-
-     set(prev => ({
-       flashcards: prev.flashcards.map(item => ({ ...item, session_state: 'pending' }))
-     }));
-
+     // Call Database Reset
      const { error } = await supabase.rpc('reset_flashcard_session');
+     
      if (error) {
          console.error("Failed to reset via RPC", error.message);
      } else {
+         // Reload fresh state
          await get().loadFlashcardSession();
      }
   }

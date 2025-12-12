@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export default function Auth() {
   const location = useLocation();
@@ -35,7 +35,14 @@ export default function Auth() {
     setLocalError(null);
     setIsLoading(true);
 
-    // Validation
+    // CRITICAL: Prevent "Failed to fetch" by checking config before network call
+    if (!isSupabaseConfigured) {
+      setLocalError("Connection Error: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing.");
+      setIsLoading(false);
+      return;
+    }
+
+    // Standard Validation
     if (isSignup && password !== confirmPassword) {
       setLocalError("Passwords do not match.");
       setIsLoading(false);
@@ -68,10 +75,9 @@ export default function Auth() {
         if (error) throw error;
 
         if (data.session) {
-          await initialize(); // Sync store with new session
+          await initialize();
           navigate('/dashboard', { replace: true });
         } else {
-          // If email confirmation is enabled, session might be null
           if (data.user && !data.session) {
               setLocalError("Account created! Please check your email to confirm signup.");
           } else {
@@ -90,7 +96,7 @@ export default function Auth() {
         if (error) throw error;
 
         if (data?.session) {
-          await initialize(); // Sync store with new session
+          await initialize();
           navigate('/dashboard', { replace: true });
         } else {
           setLocalError("Something went wrong. No session created.");
@@ -102,9 +108,9 @@ export default function Auth() {
       console.error("Auth Error:", err);
       let msg = err.message || "An unexpected error occurred.";
       
-      // Improve "Failed to fetch" error message which indicates connection issues
+      // Handle Network/Fetch Errors specifically
       if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
-        msg = "Network Error: Could not connect to the database. Please check your internet connection or verify the VITE_SUPABASE_URL.";
+        msg = "Connection failed. Please check your internet or Supabase URL.";
       }
       
       setLocalError(msg);
@@ -127,9 +133,11 @@ export default function Auth() {
           </p>
 
           {(localError || authError) && (
-            <div className="mb-6 p-4 bg-error/10 border border-error/50 rounded-lg flex items-start gap-3">
-              <span className="text-xl">⚠️</span>
-              <p className="text-sm text-error font-medium pt-0.5">{localError || authError}</p>
+            <div className="mb-6 p-4 bg-error/10 border border-error/50 rounded-lg">
+               <div className="flex items-start gap-3">
+                <span className="text-xl">⚠️</span>
+                <p className="text-sm text-error font-medium pt-0.5">{localError || authError}</p>
+              </div>
             </div>
           )}
           

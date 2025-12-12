@@ -1,66 +1,50 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Robust retrieval of environment variables
-// We use static access to allow Vite's build-time replacement to work correctly.
-// Dynamic access (e.g. env[key]) prevents Vite from injecting the values in production.
-const getSupabaseConfig = () => {
-  let url = '';
-  let key = '';
-
-  // 1. Try Vite static replacement (Standard)
+// Robust environment variable retrieval
+const getEnvVar = (key: string) => {
   try {
     // @ts-ignore
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       // @ts-ignore
-      url = import.meta.env.VITE_SUPABASE_URL || '';
-      // @ts-ignore
-      key = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+      const val = import.meta.env[key];
+      return val ? val.trim() : '';
     }
-  } catch (e) {
-    // Ignore access errors
-  }
-
-  // 2. Fallback to process.env (Vercel System Env / Node)
-  if (!url || !key) {
-    try {
+  } catch (e) { console.error(e); }
+  
+  try {
+    // @ts-ignore
+    if (typeof process !== 'undefined' && process.env) {
       // @ts-ignore
-      if (typeof process !== 'undefined' && process.env) {
-        // @ts-ignore
-        if (!url) url = process.env.VITE_SUPABASE_URL || '';
-        // @ts-ignore
-        if (!key) key = process.env.VITE_SUPABASE_ANON_KEY || '';
-      }
-    } catch (e) {
-      // Ignore
+      const val = process.env[key];
+      return val ? val.trim() : '';
     }
-  }
+  } catch (e) {}
 
-  return { url, key };
+  return '';
 };
 
-const { url, key } = getSupabaseConfig();
+let supabaseUrl = getEnvVar('VITE_SUPABASE_URL');
+const supabaseKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
 
-// Sanitize - remove accidental quotes/whitespace
-const supabaseUrl = url ? url.replace(/['"\s]/g, '') : '';
-const supabaseKey = key ? key.replace(/['"\s]/g, '') : '';
-
-// Validation
-if (!supabaseUrl || !supabaseKey) {
-  console.error("Supabase Config Missing. URL found:", !!supabaseUrl, "Key found:", !!supabaseKey);
-  throw new Error('CRITICAL: Supabase keys are missing. Please check Vercel Environment Variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY).');
+// FIX: Ensure URL has protocol to prevent "Failed to fetch"
+if (supabaseUrl && !supabaseUrl.startsWith('http')) {
+  supabaseUrl = `https://${supabaseUrl}`;
 }
 
-if (!supabaseUrl.startsWith('https://')) {
-  throw new Error(`CRITICAL: Invalid VITE_SUPABASE_URL. It must start with 'https://'. Current value: ${supabaseUrl}`);
+export const isSupabaseConfigured = supabaseUrl && supabaseKey && supabaseUrl !== 'https://placeholder.supabase.co';
+
+if (!isSupabaseConfigured) {
+  console.warn("Supabase credentials missing! App will fail to load data.");
 }
 
-export const isSupabaseConfigured = true;
-
-// Create client with explicit configuration for stability
-export const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true
+export const supabase = createClient(
+  isSupabaseConfigured ? supabaseUrl : 'https://placeholder.supabase.co', 
+  isSupabaseConfigured ? supabaseKey : 'placeholder',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
   }
-});
+);
