@@ -8,18 +8,21 @@ export default function Auth() {
   const navigate = useNavigate();
   const searchParams = new URLSearchParams(location.search);
   const isSignupInit = searchParams.get('mode') === 'signup';
+  
   const [isSignup, setIsSignup] = useState(isSignupInit);
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [localError, setLocalError] = useState<string | null>(null);
+  
+  // Replaces localError to handle both success and error styles
+  const [notification, setNotification] = useState<{ type: 'error' | 'success', message: string } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   
   const { isAuthenticated, clearAuthError, initialize, authError, login } = useStore();
 
   useEffect(() => {
-    setLocalError(null);
+    setNotification(null);
     clearAuthError();
     setPassword('');
     setConfirmPassword('');
@@ -33,27 +36,27 @@ export default function Auth() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLocalError(null);
+    setNotification(null);
     setIsLoading(true);
 
     const cleanEmail = email.trim();
 
     // CRITICAL: Prevent "Failed to fetch" by checking config before network call
     if (!isSupabaseConfigured) {
-      setLocalError("Connection Error: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing.");
+      setNotification({ type: 'error', message: "Connection Error: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing." });
       setIsLoading(false);
       return;
     }
 
     // Standard Validation
     if (isSignup && password !== confirmPassword) {
-      setLocalError("Passwords do not match.");
+      setNotification({ type: 'error', message: "Passwords do not match." });
       setIsLoading(false);
       return;
     }
 
     if (password.length < 6) {
-      setLocalError("Password must be at least 6 characters.");
+      setNotification({ type: 'error', message: "Password must be at least 6 characters." });
       setIsLoading(false);
       return;
     }
@@ -61,7 +64,7 @@ export default function Auth() {
     try {
       if (isSignup) {
         if (!username) {
-             setLocalError("Username is required.");
+             setNotification({ type: 'error', message: "Username is required." });
              setIsLoading(false);
              return;
         }
@@ -85,17 +88,21 @@ export default function Auth() {
           await initialize();
           navigate('/dashboard', { replace: true });
         } else {
+          // If no session, it means "Confirm Email" is ENABLED in Supabase.
           if (data.user && !data.session) {
-              setLocalError("Account created! Please check your email to confirm signup.");
+              setNotification({ 
+                type: 'error', 
+                message: "Supabase 'Confirm Email' setting is ON. Please DISABLE it in Project Settings -> Auth -> Providers -> Email. Then sign up with a NEW username (this one is now locked)." 
+              });
           } else {
-              setLocalError("Please check your email to confirm signup.");
+              setNotification({ type: 'success', message: "Account created successfully." });
+              setIsSignup(false);
           }
           setIsLoading(false);
         }
 
       } else {
         // --- LOGIN LOGIC ---
-        // Use store action for consistency
         await login(cleanEmail, password);
         
         // After successful login, refresh state
@@ -106,15 +113,20 @@ export default function Auth() {
     } catch (err: any) {
       console.error("Auth Error:", err);
       let msg = err.message || "An unexpected error occurred.";
+      const lowerMsg = msg.toLowerCase();
       
-      // Handle Network/Fetch Errors specifically
-      if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+      if (lowerMsg.includes("failed to fetch") || lowerMsg.includes("networkerror")) {
         msg = "Connection failed. Please check your internet or Supabase URL.";
-      } else if (msg.includes("Invalid login credentials")) {
-        msg = "Invalid login credentials. Please check your email and password.";
+      } else if (lowerMsg.includes("invalid login credentials")) {
+        msg = "Invalid username or password.";
+      } else if (lowerMsg.includes("user already registered")) {
+        msg = "Username already taken. Please choose another.";
+      } else if (lowerMsg.includes("email not confirmed")) {
+        // Vital fix: Instruct user to abandon the unconfirmed username
+        msg = "Login Failed: This username is pending email confirmation (which is impossible). Please Sign Up with a NEW username.";
       }
       
-      setLocalError(msg);
+      setNotification({ type: 'error', message: msg });
       setIsLoading(false);
     }
   };
@@ -133,12 +145,14 @@ export default function Auth() {
             {isSignup ? 'Start your vocabulary mastery journey' : 'Continue learning where you left off'}
           </p>
 
-          {(localError || authError) && (
-            <div className="mb-6 p-4 bg-error/10 border border-error/50 rounded-lg animate-pulse">
-               <div className="flex items-start gap-3">
-                <span className="text-xl">⚠️</span>
-                <p className="text-sm text-error font-medium pt-0.5">{localError || authError}</p>
-              </div>
+          {(notification || authError) && (
+            <div className={`mb-6 p-4 rounded-lg border flex items-start gap-3 ${
+              notification?.type === 'success' 
+                ? 'bg-success/10 border-success/50 text-success' 
+                : 'bg-error/10 border-error/50 text-error'
+            }`}>
+               <span className="text-xl">{notification?.type === 'success' ? '✓' : '⚠️'}</span>
+               <p className="text-sm font-medium pt-0.5 leading-tight">{notification?.message || authError}</p>
             </div>
           )}
           
@@ -216,7 +230,7 @@ export default function Auth() {
             <button 
               onClick={() => {
                 setIsSignup(!isSignup);
-                setLocalError(null);
+                setNotification(null);
               }} 
               className="text-primary font-bold hover:underline"
             >

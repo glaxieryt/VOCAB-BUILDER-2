@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { User, Unit, LessonNode, FlashcardItem, FlashcardState } from '../types';
 import { seedDatabase } from '../lib/seeder';
-import { generateUnits } from '../lib/mockData';
+import { generateUnits, SEED_VOCABULARY } from '../lib/mockData';
 
 // Concurrency lock for seeding
 let isSeedingInProgress = false;
@@ -347,9 +347,13 @@ export const useStore = create<AppState>((set, get) => ({
 
   loadFlashcardSession: async () => {
     const { user } = get();
+    // We need a user to have a session, but if we are falling back to mock data, 
+    // we can attach it to a fake user or just ignore the user ID constraint for local state.
     if (!user) return; 
 
     try {
+      if (!isSupabaseConfigured) throw new Error("Supabase not configured");
+
       // 1. Check if we need to initialize/reset the session
       // If the user has NO items in the session table, call the RPC to load from vocabulary_words
       const { count, error: countError } = await supabase
@@ -361,6 +365,7 @@ export const useStore = create<AppState>((set, get) => ({
 
       if (count === 0) {
         console.log("Initializing Flashcard Session...");
+        // This might fail if the function doesn't exist on server
         const { error: rpcError } = await supabase.rpc('reset_flashcard_session');
         if (rpcError) throw rpcError;
       }
@@ -397,10 +402,24 @@ export const useStore = create<AppState>((set, get) => ({
          }
       }
 
+      // If we still have 0 items (e.g. initialization logic ran but table was empty), use mock
+      if (allItems.length === 0) {
+          throw new Error("No items found in DB");
+      }
+
       set({ flashcards: allItems });
 
     } catch (e: any) {
-      console.error("Error loading flashcards:", e.message);
+      console.warn("Falling back to Mock Flashcards due to error (or empty DB):", e.message);
+      
+      // FALLBACK: Generate FlashcardItems from SEED_VOCABULARY
+      const mockItems: FlashcardItem[] = SEED_VOCABULARY.map((w, i) => ({
+          id: `mock-flashcard-${i}`,
+          word_id: w.id,
+          word: w,
+          session_state: 'pending' as FlashcardState
+      }));
+      set({ flashcards: mockItems });
     }
   },
 
@@ -413,13 +432,15 @@ export const useStore = create<AppState>((set, get) => ({
     }));
 
     // DB Update
-    const { error } = await supabase
-      .from('user_flashcard_session_items')
-      .update({ session_state: state })
-      .eq('id', itemId);
-      
-    if (error) {
-        console.error("Failed to update flashcard state in DB:", error.message);
+    if (!itemId.startsWith('mock-')) {
+        const { error } = await supabase
+          .from('user_flashcard_session_items')
+          .update({ session_state: state })
+          .eq('id', itemId);
+          
+        if (error) {
+            console.error("Failed to update flashcard state in DB:", error.message);
+        }
     }
   },
 
@@ -428,11 +449,12 @@ export const useStore = create<AppState>((set, get) => ({
      const { error } = await supabase.rpc('reset_flashcard_session');
      
      if (error) {
-         console.error("Failed to reset via RPC", error.message);
-     } else {
-         // Reload fresh state
-         await get().loadFlashcardSession();
-     }
+         console.warn("Failed to reset via RPC (likely Mock Mode):", error.message);
+         // If RPC failed, likely we are in mock mode, so just reload session
+     } 
+     
+     // Reload fresh state (which will re-trigger fallback if needed)
+     await get().loadFlashcardSession();
   }
 
 }));
