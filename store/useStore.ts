@@ -414,7 +414,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     try {
-      // 1. Fetch existing session items
+      // 1. Fetch existing session items (attempt to load all)
       const { data: existingItems, error: fetchError } = await supabase
         .from('user_flashcard_session_items')
         .select(`
@@ -430,33 +430,25 @@ export const useStore = create<AppState>((set, get) => ({
       if (existingItems && existingItems.length > 0) {
         set({ flashcards: existingItems as FlashcardItem[] });
       } else {
-        // 2. If empty, create new session (Random 20)
-        // Note: In a real app, we'd use .rpc to get random rows efficiently
-        const { data: words } = await supabase
-          .from('vocabulary_words')
-          .select('*')
-          .limit(20); // Simplified random fetch
+        // 2. If empty, utilize the RPC to populate ALL words
+        // This ensures we get the full deck efficiently
+        const { error: rpcError } = await supabase.rpc('reset_flashcard_session');
+        
+        if (rpcError) throw rpcError;
 
-        if (words) {
-          const newItems = words.map(w => ({
-            user_id: user.id,
-            word_id: w.id,
-            session_state: 'pending'
-          }));
-
-          const { data: insertedItems, error: insertError } = await supabase
+        // Fetch them now that they are populated
+        const { data: newItems, error: refetchError } = await supabase
             .from('user_flashcard_session_items')
-            .insert(newItems)
             .select(`
               id,
               word_id,
               session_state,
               word:vocabulary_words(*)
-            `);
-
-          if (insertError) throw insertError;
-          set({ flashcards: insertedItems as FlashcardItem[] });
-        }
+            `)
+            .eq('user_id', user.id);
+            
+        if (refetchError) throw refetchError;
+        set({ flashcards: newItems as FlashcardItem[] });
       }
     } catch (e) {
       console.error("Error loading flashcards:", e);
@@ -480,18 +472,19 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   resetFlashcards: async () => {
-     // Optimistic
-    set(prev => ({
-      flashcards: prev.flashcards.map(item => ({ ...item, session_state: 'pending' }))
-    }));
+     const { user } = get();
+     if (!user) return;
+
+     // Optimistic Update: Set all local to 'pending' immediately for UI responsiveness
+     set(prev => ({
+       flashcards: prev.flashcards.map(item => ({ ...item, session_state: 'pending' }))
+     }));
 
     if (isSupabaseConfigured) {
-       const { user } = get();
-       if(user) {
-         await supabase
-          .from('user_flashcard_session_items')
-          .update({ session_state: 'pending' })
-          .eq('user_id', user.id);
+       // Call the backend function to reset DB state efficiently for all words
+       const { error } = await supabase.rpc('reset_flashcard_session');
+       if (error) {
+           console.error("Failed to reset via RPC", error);
        }
     }
   }

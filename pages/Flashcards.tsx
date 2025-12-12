@@ -16,6 +16,7 @@ export default function Flashcards() {
   const [isFlipped, setIsFlipped] = useState(false);
   const [dragX, setDragX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [showToast, setShowToast] = useState(false);
   
   // Swipe Logic Refs
   const startX = useRef(0);
@@ -37,7 +38,7 @@ export default function Flashcards() {
       if (activeItems.length > 0) {
         setQueue(activeItems);
         setCurrentIndex(0);
-      } else if (countKnow === flashcards.length) {
+      } else if (countKnow === flashcards.length && countKnow > 0) {
          setIsFinished(true);
       }
     }
@@ -95,26 +96,8 @@ export default function Flashcards() {
   };
 
   const handleEndOfRound = () => {
-    // Re-calculate based on the *store* (which has updated states)
-    // We need to wait a tick for store to update, or filter the 'flashcards' dependency
-    // Since we updated store optimistically, get() inside store works, but here we depend on prop.
-    // Let's filter the fresh 'flashcards' from store in the next render cycle or force check
-    
-    // Simple approach: Set a temporary "check" state or rely on useEffect
-    // But we need immediate feedback.
-    
-    // Filter items that are STILL 'still_learning' or 'pending' (if any skipped)
-    // Note: We just marked the current one.
-    
-    // We'll defer the queue update to a useEffect that watches 'currentIndex' vs 'queue.length'
-    // But for now, let's manually trigger a re-sync logic
-    
-    // Find items that still need review
-    // We access the global flashcards store directly via import or assume the prop updates fast enough
-    // For safety, let's check the local queue + the last action.
-    
-    // Better: Set a flag to trigger queue refresh
-    setQueue([]); // This triggers the useEffect above to refill the queue with remaining items
+    // Force reset queue to trigger effect that refills it from store
+    setQueue([]); 
   };
 
   const handleReset = async () => {
@@ -124,6 +107,10 @@ export default function Flashcards() {
     setCurrentIndex(0);
     setDragX(0);
     setIsFlipped(false);
+    
+    // Trigger Toast
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
   };
 
   // --- RENDER ---
@@ -144,7 +131,7 @@ export default function Flashcards() {
       <div className="flex justify-between items-center p-4 pt-6 max-w-md mx-auto w-full relative z-10">
         {/* Still Learning Counter */}
         <div className="flex flex-col items-center">
-          <div className="w-10 h-10 rounded-full border-2 border-warning flex items-center justify-center text-warning font-bold bg-warning/10">
+          <div className="w-10 h-10 rounded-full border-2 border-warning flex items-center justify-center text-warning font-bold bg-warning/10 transition-all duration-300">
             {countLearning}
           </div>
         </div>
@@ -156,7 +143,7 @@ export default function Flashcards() {
 
         {/* Known Counter */}
         <div className="flex flex-col items-center">
-          <div className="w-10 h-10 rounded-full border-2 border-success flex items-center justify-center text-success font-bold bg-success/10">
+          <div className="w-10 h-10 rounded-full border-2 border-success flex items-center justify-center text-success font-bold bg-success/10 transition-all duration-300">
             {countKnow}
           </div>
         </div>
@@ -235,6 +222,14 @@ export default function Flashcards() {
         >
           Reset Cards
         </button>
+      </div>
+
+      {/* Toast Notification */}
+      <div 
+        className={`fixed bottom-24 left-1/2 -translate-x-1/2 bg-surface border border-white/10 shadow-2xl px-6 py-3 rounded-xl flex items-center gap-3 transition-all duration-300 z-50 ${showToast ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}
+      >
+        <span className="text-xl">🔄</span>
+        <span className="font-bold text-white">Progress Reset: Ready to practice again.</span>
       </div>
 
       {/* Global CSS for 3D Flip */}
