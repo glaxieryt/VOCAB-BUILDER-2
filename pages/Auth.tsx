@@ -65,42 +65,31 @@ export default function Auth() {
           }
         });
 
-        if (error) {
-          console.error("Signup failed:", error.message);
-          setLocalError(error.message);
-          setIsLoading(false);
-          return;
-        }
+        if (error) throw error;
 
         if (data.session) {
           await initialize(); // Sync store with new session
           navigate('/dashboard', { replace: true });
         } else {
-          setLocalError("Please check your email to confirm signup.");
+          // If email confirmation is enabled, session might be null
+          if (data.user && !data.session) {
+              setLocalError("Account created! Please check your email to confirm signup.");
+          } else {
+              setLocalError("Please check your email to confirm signup.");
+          }
           setIsLoading(false);
         }
 
       } else {
-        // --- LOGIN LOGIC (STRICT) ---
-        console.log("Attempting login..."); 
-
-        // 1. AWAIT the response.
+        // --- LOGIN LOGIC ---
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
-        // 2. CHECK FOR ERROR. If error exists, STOP.
-        if (error) {
-          console.error("Login Error:", error.message);
-          setLocalError("Invalid credentials. Please try again.");
-          setIsLoading(false);
-          return; // <--- CRITICAL: Stops flow.
-        }
+        if (error) throw error;
 
-        // 3. SUCCESS. Verify session.
         if (data?.session) {
-          console.log("Login success, redirecting...");
           await initialize(); // Sync store with new session
           navigate('/dashboard', { replace: true });
         } else {
@@ -111,7 +100,14 @@ export default function Auth() {
 
     } catch (err: any) {
       console.error("Auth Error:", err);
-      setLocalError(err.message || "An unexpected error occurred.");
+      let msg = err.message || "An unexpected error occurred.";
+      
+      // Improve "Failed to fetch" error message which indicates connection issues
+      if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+        msg = "Network Error: Could not connect to the database. Please check your internet connection or verify the VITE_SUPABASE_URL.";
+      }
+      
+      setLocalError(msg);
       setIsLoading(false);
     }
   };
