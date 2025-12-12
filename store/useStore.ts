@@ -354,7 +354,8 @@ export const useStore = create<AppState>((set, get) => ({
             lesson_id: dbLessonId,
             is_completed: true, 
             score,
-            stars
+            stars,
+            completed_at: new Date().toISOString()
           }, { onConflict: 'user_id, lesson_id' });
 
         if (lessonError) {

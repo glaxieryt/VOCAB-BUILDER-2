@@ -1167,11 +1167,6 @@ Yarn (n), Tale story fibers, Spinning yarn;`;
 // Helper to parse the raw vocabulary string into objects
 const parseVocabulary = (): VocabularyWord[] => {
   return rawVocabulary.split('\n').filter(line => line.trim().length > 0).map((line, index) => {
-    // Regex matches: Word (POS), Definition, Sentence;
-    // Group 1: Word
-    // Group 2: POS (optional)
-    // Group 3: Definition
-    // Group 4: Sentence (optional)
     const regex = /^([^,(]+)(?:\s*\(([^)]+)\))?\s*,?\s*([^,;]+)(?:[;,]\s*(.*))?$/;
     const match = line.match(regex);
 
@@ -1193,7 +1188,6 @@ const parseVocabulary = (): VocabularyWord[] => {
             unit_number: unitNum
         };
     } else {
-        // Fallback for lines that might fail regex
         const parts = line.split(',');
         const word = parts[0]?.trim() || `Word-${index}`;
         return {
@@ -1216,19 +1210,15 @@ export const getWordByGlobalIndex = (index: number): VocabularyWord => {
   if (index < SEED_VOCABULARY.length) {
     return SEED_VOCABULARY[index];
   }
-  // Safe fallback if index exceeds array (though with 1161 items, unlikely for current scope)
   return SEED_VOCABULARY[SEED_VOCABULARY.length - 1];
 };
 
 export const generateUnits = (): Unit[] => {
   const units: Unit[] = [];
-  // 120 units covers 1200 words (10 per unit), sufficient for 1161 words
   const TOTAL_UNITS = 120; 
 
   for (let u = 1; u <= TOTAL_UNITS; u++) {
     const lessons: LessonNode[] = [];
-    
-    // Generate 10 Lessons (Learning) + 1 Test (Retention Check)
     for (let l = 1; l <= 11; l++) {
       let type: 'intro' | 'practice' | 'test' = 'practice';
       if (l === 11) type = 'test';
@@ -1264,21 +1254,54 @@ export const shuffle = <T>(array: T[]): T[] => {
   return newArr;
 };
 
-// New Helper to get words for a lesson to feed into AI
+// --- NEW GENERATOR LOGIC (Fixes Loop & Randomization) ---
+export const generateFallbackQuiz = (words: VocabularyWord[], targetCount: number = 10): Exercise[] => {
+  // 1. Create a pool of words large enough for targetCount
+  let pool = [...words];
+  while (pool.length < targetCount && pool.length > 0) {
+    pool = [...pool, ...words];
+  }
+  // Shuffle pool and take targetCount
+  pool = shuffle(pool).slice(0, targetCount);
+
+  return pool.map((targetWord, index) => {
+    // 2. Distractors: Shuffle entire vocab, exclude target, take 3
+    const distractors = shuffle(SEED_VOCABULARY)
+      .filter(w => w.id !== targetWord.id && w.definition !== targetWord.definition)
+      .slice(0, 3)
+      .map(w => w.definition);
+    
+    // Ensure we have 3 distractors even if filtering fails
+    while (distractors.length < 3) {
+       distractors.push("Definition unavailable");
+    }
+
+    // 3. Options: Combine & Shuffle (Fixes 'Always Option B')
+    const options = shuffle([targetWord.definition, ...distractors]);
+
+    return {
+      id: `fallback-${targetWord.id}-${index}`,
+      type: 'mcq',
+      word: targetWord,
+      questionText: `What is the definition of "${targetWord.word}"?`,
+      options: options,
+      correctAnswer: targetWord.definition
+    };
+  });
+};
+
 export const getWordsForLesson = (lessonId: string): VocabularyWord[] => {
   const parts = lessonId.split('-'); 
   const unitNum = parseInt(parts[1]);
   const lessonNum = parseInt(parts[3]);
   const words: VocabularyWord[] = [];
 
-  // If Unit Test, get all words from current unit
   if (lessonNum === 11) {
     const currentUnitStartIdx = (unitNum - 1) * 10;
     for (let i = 0; i < 10; i++) {
       words.push(getWordByGlobalIndex(currentUnitStartIdx + i));
     }
   } else {
-    // For standard lessons, get the new word + review words
     const newWordIndex = ((unitNum - 1) * 10) + (lessonNum - 1);
     words.push(getWordByGlobalIndex(newWordIndex));
 
@@ -1290,40 +1313,3 @@ export const getWordsForLesson = (lessonId: string): VocabularyWord[] => {
   
   return words;
 }
-
-export const generateExercisesForLesson = (lessonId: string): Exercise[] => {
-  const parts = lessonId.split('-'); 
-  const unitNum = parseInt(parts[1]);
-  const lessonNum = parseInt(parts[3]);
-  const exercises: Exercise[] = [];
-
-  if (lessonNum === 11) {
-    const currentUnitStartIdx = (unitNum - 1) * 10;
-    const currentUnitWords = Array.from({ length: 10 }, (_, i) => getWordByGlobalIndex(currentUnitStartIdx + i));
-    
-    currentUnitWords.forEach(word => {
-      const distractors = currentUnitWords.filter(w => w.id !== word.id).map(w => w.definition);
-      exercises.push({
-        id: `test-${word.id}-${Date.now()}`,
-        type: 'mcq',
-        word: word,
-        questionText: `Select the correct definition for: ${word.word}`,
-        options: shuffle([word.definition, ...shuffle(distractors).slice(0, 3)]),
-        correctAnswer: word.definition
-      });
-    });
-    return shuffle(exercises);
-  }
-
-  const newWordIndex = ((unitNum - 1) * 10) + (lessonNum - 1);
-  const newWord = getWordByGlobalIndex(newWordIndex);
-
-  exercises.push({
-    id: `new-scaffold-${newWord.id}`,
-    type: 'scaffolded',
-    word: newWord,
-    correctAnswer: 'understood'
-  });
-
-  return exercises;
-};

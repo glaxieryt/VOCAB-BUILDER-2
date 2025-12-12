@@ -4,7 +4,7 @@ import { useStore } from '../store/useStore';
 import { generateAIQuiz } from '../lib/ai';
 import { Exercise, VocabularyWord } from '../types';
 import { supabase } from '../lib/supabase';
-import { getWordsForLesson, SEED_VOCABULARY, shuffle } from '../lib/mockData';
+import { getWordsForLesson, generateFallbackQuiz } from '../lib/mockData';
 
 // --- Sound Effects Utility ---
 const playSound = (type: 'correct' | 'incorrect') => {
@@ -108,7 +108,7 @@ const MCQView = ({ exercise, onAnswer, disabled }: { exercise: Exercise, onAnswe
 export default function Learn() {
   const { lessonId } = useParams<{ lessonId: string }>();
   const navigate = useNavigate();
-  const { completeLesson, addXP, units } = useStore();
+  const { completeLesson, units } = useStore();
   
   const [queue, setQueue] = useState<Exercise[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -124,8 +124,6 @@ export default function Learn() {
       setLoading(true);
 
       try {
-        // 1. Find DB ID for this lesson
-        // lessonId format: unit-X-lesson-Y
         const parts = lessonId.split('-');
         const unitSeq = parseInt(parts[1]);
         const lessonNum = parseInt(parts[3]);
@@ -135,9 +133,8 @@ export default function Learn() {
 
         let words: VocabularyWord[] = [];
 
-        // Check if we are in Mock Mode or Real DB Mode
+        // 1. Fetch Words (DB or Mock)
         if (lesson && (lesson as any).dbId) {
-            // 2a. Fetch Words from Supabase (REAL DATA)
             const { data: wordsData, error } = await supabase
               .from('vocabulary_words')
               .select('*')
@@ -146,12 +143,9 @@ export default function Learn() {
             if (!error && wordsData && wordsData.length > 0) {
                  words = wordsData as VocabularyWord[];
             } else {
-                 console.warn("Real DB fetch failed or empty, falling back to mock data for words.");
                  words = getWordsForLesson(lessonId);
             }
         } else {
-            // 2b. Mock Mode
-            console.warn("No DB Link (Mock Mode), loading local words.");
             words = getWordsForLesson(lessonId);
         }
 
@@ -161,58 +155,30 @@ export default function Learn() {
            return;
         }
 
-        // 3. Generate Questions (AI or Fallback)
-        // Using AI is preferred, but fallback must be robust
+        // 2. Generate Questions
+        let exercises: Exercise[] = [];
         const aiQuestions = await generateAIQuiz(words);
         
         if (aiQuestions.length > 0) {
-          const intro: Exercise[] = [];
-          if (lessonNum !== 11) {
-            // Intro for the first word in the list (assuming 1 new word per lesson)
-            if (words.length > 0) {
-              intro.push({
-                 id: `scaffold-${words[0].id}`,
-                 type: 'scaffolded',
-                 word: words[0],
-                 correctAnswer: 'understood'
-              });
-            }
-          }
-          setQueue([...intro, ...aiQuestions]);
+          exercises = aiQuestions;
         } else {
-            // SMART FALLBACK (Solves "Obvious Answers" and "Repetition")
-            const basicExercises: Exercise[] = [];
-            const targetQuestions = 10;
-            
-            // Cycle through words to ensure we get 10 questions even if words array is small
-            let wordIndex = 0;
-            while (basicExercises.length < targetQuestions && words.length > 0) {
-                const w = words[wordIndex % words.length];
-                const qIdx = basicExercises.length;
-                
-                // Robust Distractor Generation: 
-                // Shuffle entire vocab, exclude current word, take 3 definitions
-                const distractors = shuffle(SEED_VOCABULARY)
-                    .filter(sv => sv.id !== w.id && sv.definition !== w.definition)
-                    .slice(0, 3)
-                    .map(sv => sv.definition);
-
-                // Fisher-Yates Shuffle for options to prevent "Always Option B"
-                const options = shuffle([w.definition, ...distractors]);
-
-                basicExercises.push({
-                    id: `basic-${w.id}-${qIdx}`,
-                    type: 'mcq',
-                    word: w,
-                    questionText: `What is the definition of "${w.word}"?`,
-                    options: options,
-                    correctAnswer: w.definition
-                });
-                
-                wordIndex++;
-            }
-            setQueue(basicExercises);
+          // Use Robust Fallback Generator
+          exercises = generateFallbackQuiz(words, 10);
         }
+
+        // 3. Add Intro Slide if needed
+        if (lessonNum !== 11 && words.length > 0) {
+           const intro: Exercise = {
+              id: `scaffold-${words[0].id}`,
+              type: 'scaffolded',
+              word: words[0],
+              correctAnswer: 'understood'
+           };
+           exercises = [intro, ...exercises];
+        }
+
+        setQueue(exercises);
+
       } catch (err) {
         console.error("Error generating lesson:", err);
       } finally {
@@ -240,7 +206,6 @@ export default function Learn() {
       playSound('correct');
       if (!mistakes.includes(currentEx.id) && currentEx.type !== 'scaffolded') {
         setSessionScore(prev => ({ ...prev, correct: prev.correct + 1 }));
-        // XP added at end of lesson
       }
     } else {
       setFeedback('incorrect');
@@ -330,7 +295,6 @@ export default function Learn() {
         <div className="w-full">
            {currentEx.type === 'scaffolded' && <ScaffoldedView exercise={currentEx} onAnswer={handleAnswer} />}
            {currentEx.type === 'mcq' && <MCQView exercise={currentEx} onAnswer={handleAnswer} disabled={feedback !== null} />}
-           {currentEx.type === 'cloze' && <MCQView exercise={currentEx} onAnswer={handleAnswer} disabled={feedback !== null} />}
         </div>
       </main>
 

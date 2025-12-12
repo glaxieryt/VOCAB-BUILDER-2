@@ -9,6 +9,7 @@ import Auth from './pages/Auth';
 import ComingSoon from './pages/ComingSoon';
 import Navbar from './components/Navbar';
 import { useStore } from './store/useStore';
+import { supabase } from './lib/supabase';
 
 // Scroll to top on route change
 const ScrollToTop = () => {
@@ -34,11 +35,23 @@ const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 };
 
 export default function App() {
-  const { initialize } = useStore();
+  const { initialize, syncUserData } = useStore();
 
   useEffect(() => {
     initialize();
   }, [initialize]);
+
+  // SYNC FUNCTION: Run this when 'user' session is detected to prevent 0 progress on reload
+  useEffect(() => {
+    const syncUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        console.log("Session detected, syncing user data...");
+        await syncUserData();
+      }
+    };
+    syncUser();
+  }, [syncUserData]);
 
   return (
     <Router>
