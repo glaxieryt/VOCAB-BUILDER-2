@@ -1,4 +1,4 @@
-import { GoogleGenAI, SchemaType } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { VocabularyWord, Exercise } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -11,7 +11,6 @@ export async function generateAIQuiz(words: VocabularyWord[]): Promise<Exercise[
     ${wordsList}
 
     Generate 10 multiple-choice questions. 
-    Constraint: Ensure the output is a JSON array.
   `;
 
   const systemInstruction = `You are an expert language tutor. I will provide a list of vocabulary words. You must generate exactly 10 multiple-choice questions based on these words. 
@@ -20,15 +19,6 @@ export async function generateAIQuiz(words: VocabularyWord[]): Promise<Exercise[
   1. Do NOT ask grammatical classification questions (e.g., Is this a noun or verb?). 
   2. Focus on fill-in-the-blank sentences and matching words to real-life scenarios. 
   3. Even if the word list is short, create multiple unique scenarios for each word to reach the total of 10 questions. 
-  4. Return the output as a strict JSON array so the app can parse it.
-  
-  The JSON structure for each item must be:
-  {
-    "word_text": "the word being tested",
-    "question": "The question text or sentence with blank",
-    "options": ["option1", "option2", "option3", "option4"],
-    "correct_answer": "the correct option text"
-  }
   `;
 
   try {
@@ -38,10 +28,42 @@ export async function generateAIQuiz(words: VocabularyWord[]): Promise<Exercise[
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              word_text: {
+                type: Type.STRING,
+                description: 'The word being tested.'
+              },
+              question: {
+                type: Type.STRING,
+                description: 'The question text or sentence with blank.'
+              },
+              options: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.STRING,
+                },
+                description: 'List of 4 options.'
+              },
+              correct_answer: {
+                type: Type.STRING,
+                description: 'The correct option text.'
+              },
+            },
+            required: ["word_text", "question", "options", "correct_answer"],
+          },
+        },
       }
     });
 
-    const rawData = JSON.parse(response.text || '[]');
+    let jsonText = response.text || '[]';
+    // Remove markdown code blocks if present
+    jsonText = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();
+
+    const rawData = JSON.parse(jsonText);
     
     // Map AI response to our Exercise type
     return rawData.map((item: any, index: number) => {
