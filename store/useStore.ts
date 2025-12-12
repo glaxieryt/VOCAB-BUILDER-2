@@ -423,25 +423,46 @@ export const useStore = create<AppState>((set, get) => ({
       if (countError) throw countError;
 
       // 2. Fix the "20 Words Bug": If the deck is small (incomplete), force populate via RPC
+      // The requirement is 1161 words. If significantly less, we reset.
       if (count === null || count < 100) {
         console.log("Deck incomplete. Initializing full vocabulary via RPC...");
         const { error: rpcError } = await supabase.rpc('reset_flashcard_session');
         if (rpcError) throw rpcError;
       }
 
-      // 3. Fetch ALL items without any limits to ensure we get the full 1161+ words
-      const { data, error } = await supabase
-        .from('user_flashcard_session_items')
-        .select(`
-          id,
-          word_id,
-          session_state,
-          word:vocabulary_words(*)
-        `)
-        .eq('user_id', user.id);
+      // 3. Fetch ALL items with Pagination (Supabase defaults to 1000 rows max)
+      let allItems: FlashcardItem[] = [];
+      let page = 0;
+      const pageSize = 1000;
+      let hasMore = true;
 
-      if (error) throw error;
-      set({ flashcards: data as FlashcardItem[] });
+      while (hasMore) {
+         const { data, error } = await supabase
+           .from('user_flashcard_session_items')
+           .select(`
+              id,
+              word_id,
+              session_state,
+              word:vocabulary_words(*)
+            `)
+           .eq('user_id', user.id)
+           .range(page * pageSize, (page + 1) * pageSize - 1);
+
+         if (error) throw error;
+
+         if (data && data.length > 0) {
+            allItems = [...allItems, ...data] as FlashcardItem[];
+            if (data.length < pageSize) {
+               hasMore = false;
+            } else {
+               page++;
+            }
+         } else {
+            hasMore = false;
+         }
+      }
+
+      set({ flashcards: allItems });
 
     } catch (e) {
       console.error("Error loading flashcards:", e);
@@ -468,13 +489,13 @@ export const useStore = create<AppState>((set, get) => ({
      const { user } = get();
      if (!user) return;
 
-     // 1. Optimistic Update: INSTANTLY set all to pending so UI counters hit 0
+     // 1. Optimistic Update: INSTANTLY set all to pending
      set(prev => ({
        flashcards: prev.flashcards.map(item => ({ ...item, session_state: 'pending' }))
      }));
 
     if (isSupabaseConfigured) {
-       // 2. Call RPC to reset backend state for all items
+       // 2. Call RPC to reset backend state
        const { error } = await supabase.rpc('reset_flashcard_session');
        
        if (error) {

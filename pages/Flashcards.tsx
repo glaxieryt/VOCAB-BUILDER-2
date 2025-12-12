@@ -33,21 +33,24 @@ export default function Flashcards() {
     loadFlashcardSession();
   }, []);
 
-  // Effect to populate queue INITIALLY or when Reset occurs
+  // Effect to populate queue
   useEffect(() => {
-    // Only auto-fill if queue is empty, we aren't finished, and we haven't started a round yet (index 0)
-    // This prevents the effect from interfering with the manual "Next Round" logic
-    if (flashcards.length > 0 && queue.length === 0 && !isFinished) {
-      const activeItems = flashcards.filter(f => f.session_state !== 'know');
-      
-      if (activeItems.length > 0) {
-        setQueue(activeItems);
-        setCurrentIndex(0);
-      } else if (countKnow === flashcards.length && countKnow > 0) {
-         setIsFinished(true);
+    // If we have flashcards, and the queue is empty...
+    if (flashcards.length > 0 && queue.length === 0) {
+      if (!isFinished) {
+         // Try to find active items (pending or still_learning)
+         const activeItems = flashcards.filter(f => f.session_state !== 'know');
+         
+         if (activeItems.length > 0) {
+           setQueue(activeItems);
+           setCurrentIndex(0);
+         } else if (countKnow === flashcards.length && countKnow > 0) {
+            // Everything is known
+            setIsFinished(true);
+         }
       }
     }
-  }, [flashcards, isFinished]); // Minimal dependencies to strictly handle "Load" and "Reset" states
+  }, [flashcards, isFinished, queue.length, countKnow]);
 
   // Handle Touch/Swipe Gestures
   const handleTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
@@ -87,7 +90,7 @@ export default function Flashcards() {
 
     // 2. Wait for animation
     setTimeout(async () => {
-      // 3. Update DB/Store (Important: Update state AFTER animation starts to avoid jank)
+      // 3. Update DB/Store
       await markFlashcard(currentCard.id, newState);
       
       setDragX(0);
@@ -100,24 +103,20 @@ export default function Flashcards() {
       } else {
         // --- END OF DECK LOGIC ---
         // We reached the end of the current queue.
-        // Re-calculate based on the *latest* store state (which includes the update we just made)
-        // We filter for anything that is NOT 'know'. 
-        // This naturally catches 'still_learning' from the pass we just finished.
-        const remainingItems = flashcards
-          .map(item => item.id === currentCard.id ? { ...item, session_state: newState } : item) // localized optimistic check
-          .filter(f => f.session_state !== 'know');
-
-        if (remainingItems.length > 0) {
-          // Restart loop with remaining items
-          setQueue(remainingItems);
-          setCurrentIndex(0);
-          setRound(r => r + 1);
-          // Optional: Show a quick toast or indicator that round restarted?
-        } else {
-          // Nothing left to learn!
-          setIsFinished(true);
-          setQueue([]);
-        }
+        // Recalculate remaining items from the *latest* flashcards state + our current update
+        // We filter for anything that is NOT 'know'
+        
+        // Note: 'flashcards' from the hook might be slightly stale in this closure, 
+        // but 'markFlashcard' updates the store state. 
+        // We can wait for the 'useEffect' to refill the queue, 
+        // OR we can manually trigger the refill logic here for smoother UX.
+        
+        // Force queue clear to trigger useEffect refill
+        setQueue([]);
+        setRound(r => r + 1);
+        setCurrentIndex(0);
+        
+        // If everything is done, the useEffect will catch it and set isFinished
       }
     }, 200);
   };
