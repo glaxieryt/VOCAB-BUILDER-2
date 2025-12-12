@@ -6,11 +6,20 @@ let ai: GoogleGenAI | null = null;
 
 const getAI = () => {
   if (!ai) {
-    if (!process.env.API_KEY) {
+    let apiKey = '';
+    try {
+      if (typeof process !== 'undefined' && process.env) {
+        apiKey = process.env.API_KEY || '';
+      }
+    } catch (e) {
+      console.warn("Failed to access process.env.API_KEY");
+    }
+
+    if (!apiKey) {
       console.warn("Google API Key missing. AI features will be disabled.");
       return null;
     }
-    ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    ai = new GoogleGenAI({ apiKey });
   }
   return ai;
 };

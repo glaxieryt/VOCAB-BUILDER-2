@@ -9,6 +9,7 @@ export default function Auth() {
   const searchParams = new URLSearchParams(location.search);
   const isSignupInit = searchParams.get('mode') === 'signup';
   const [isSignup, setIsSignup] = useState(isSignupInit);
+  const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -55,10 +56,14 @@ export default function Auth() {
       return;
     }
 
-    const email = username.includes('@') ? username : `${username}@example.com`;
-
     try {
       if (isSignup) {
+        if (!username) {
+             setLocalError("Username is required.");
+             setIsLoading(false);
+             return;
+        }
+
         // --- SIGNUP LOGIC ---
         const { data, error } = await supabase.auth.signUp({
           email,
@@ -143,16 +148,30 @@ export default function Auth() {
           
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Username</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Email</label>
               <input
-                type="text"
+                type="email"
                 required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-background border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors"
-                placeholder="johndoe"
+                placeholder="you@example.com"
               />
             </div>
+            
+            {isSignup && (
+              <div className="animate-float" style={{ animation: 'none' }}>
+                <label className="block text-sm font-medium text-text-secondary mb-1">Username</label>
+                <input
+                  type="text"
+                  required
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full bg-background border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary transition-colors"
+                  placeholder="johndoe"
+                />
+              </div>
+            )}
             
             <div>
               <label className="block text-sm font-medium text-text-secondary mb-1">Password</label>

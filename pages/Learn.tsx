@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore';
 import { generateAIQuiz } from '../lib/ai';
 import { Exercise, VocabularyWord } from '../types';
 import { supabase } from '../lib/supabase';
+import { getWordsForLesson } from '../lib/mockData';
 
 // --- Sound Effects Utility ---
 const playSound = (type: 'correct' | 'incorrect') => {
@@ -132,24 +133,30 @@ export default function Learn() {
         const unit = units.find(u => u.id === unitSeq);
         const lesson = unit?.lessons.find(l => l.lessonNumber === lessonNum);
 
-        if (!lesson || !(lesson as any).dbId) {
-            console.error("Lesson not found in store");
-            setLoading(false);
-            return;
+        let words: VocabularyWord[] = [];
+
+        // Check if we are in Mock Mode or Real DB Mode
+        if (lesson && (lesson as any).dbId) {
+            // 2a. Fetch Words from Supabase (REAL DATA)
+            const { data: wordsData, error } = await supabase
+              .from('vocabulary_words')
+              .select('*')
+              .eq('lesson_id', (lesson as any).dbId);
+
+            if (!error && wordsData && wordsData.length > 0) {
+                 words = wordsData as VocabularyWord[];
+            } else {
+                 console.warn("Real DB fetch failed or empty, falling back to mock data for words.");
+                 words = getWordsForLesson(lessonId);
+            }
+        } else {
+            // 2b. Mock Mode
+            console.warn("No DB Link (Mock Mode), loading local words.");
+            words = getWordsForLesson(lessonId);
         }
 
-        // 2. Fetch Words from Supabase (REAL DATA)
-        const { data: wordsData, error } = await supabase
-          .from('vocabulary_words')
-          .select('*')
-          .eq('lesson_id', (lesson as any).dbId);
-
-        if (error) throw error;
-        
-        const words = wordsData as VocabularyWord[];
-        
-        if (!words || words.length === 0) {
-           console.warn("No words found for this lesson.");
+        if (words.length === 0) {
+           console.warn("No words found for this lesson (DB & Fallback failed).");
            setLoading(false);
            return;
         }
