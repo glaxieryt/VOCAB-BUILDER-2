@@ -49,12 +49,6 @@ export default function Landing() {
             >
               Start Learning Free
             </Link>
-            <Link 
-              to="/auth" 
-              className="bg-surface hover:bg-white/10 text-white border border-white/10 px-8 py-4 rounded-full text-lg font-bold transition-all hover:-translate-y-1"
-            >
-              Log In
-            </Link>
           </div>
         </div>
       </section>
