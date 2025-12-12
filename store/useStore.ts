@@ -22,6 +22,7 @@ interface AppState {
   clearAuthError: () => void;
   completeLesson: (lessonId: string, score: number, stars: number) => Promise<void>;
   initialize: () => Promise<void>;
+  syncUserData: () => Promise<void>; // New Sync Function
   addXP: (amount: number) => Promise<void>;
   fetchCourseData: () => Promise<void>;
 
@@ -107,18 +108,24 @@ export const useStore = create<AppState>((set, get) => ({
               avatar_url: profile.avatar_url
             }
           });
+          
+          // 4. CRITICAL SYNC: Fetch all user data (Lessons + Flashcards)
+          await get().syncUserData();
+        } else {
+           // Fallback if profile missing but session exists
+           await get().fetchCourseData();
         }
+      } else {
+        // No user, just fetch generic course data
+        await get().fetchCourseData();
       }
-
-      // 4. Load Course Data (Real DB or Fallback)
-      await get().fetchCourseData();
 
       // 5. Setup Auth Listener
       supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_IN' && session) {
           get().initialize();
         } else if (event === 'SIGNED_OUT') {
-          set({ user: null, isAuthenticated: false, units: [] });
+          set({ user: null, isAuthenticated: false, units: [], flashcards: [] });
         }
       });
 
@@ -135,6 +142,23 @@ export const useStore = create<AppState>((set, get) => ({
       }
     } finally {
       set({ isLoading: false });
+    }
+  },
+
+  syncUserData: async () => {
+    const { user } = get();
+    if (!user) return;
+    
+    console.log("🔄 Syncing User Data from Cloud...");
+    
+    try {
+      await Promise.all([
+        get().fetchCourseData(),      // Syncs Units & Lesson Progress (Green Nodes)
+        get().loadFlashcardSession()  // Syncs Flashcard Memory (Dashboard Counts)
+      ]);
+      console.log("✅ User Data Synced");
+    } catch (err) {
+      console.error("Sync failed:", err);
     }
   },
 
@@ -237,7 +261,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   logout: async () => {
     await supabase.auth.signOut();
-    set({ user: null, isAuthenticated: false, units: [] });
+    set({ user: null, isAuthenticated: false, units: [], flashcards: [] });
     set({ isLoading: false });
   },
 

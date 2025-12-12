@@ -7,16 +7,18 @@ let ai: GoogleGenAI | null = null;
 const getAI = () => {
   if (!ai) {
     let apiKey = '';
-    try {
-      if (typeof process !== 'undefined' && process.env) {
-        apiKey = process.env.API_KEY || '';
-      }
-    } catch (e) {
-      console.warn("Failed to access process.env.API_KEY");
+    
+    // 1. Try Vite Standard (Preferred for Production)
+    if (import.meta.env.VITE_GEMINI_API_KEY) {
+      apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    }
+    // 2. Fallback to process.env (if configured in vite.config.ts or legacy)
+    else if (typeof process !== 'undefined' && process.env) {
+      apiKey = process.env.VITE_GEMINI_API_KEY || process.env.API_KEY || '';
     }
 
     if (!apiKey) {
-      console.warn("Google API Key missing. AI features will be disabled.");
+      console.warn("Google API Key missing (VITE_GEMINI_API_KEY). AI features will be disabled.");
       return null;
     }
     ai = new GoogleGenAI({ apiKey });
