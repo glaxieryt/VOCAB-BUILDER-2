@@ -20,8 +20,17 @@ const ScrollToTop = () => {
 };
 
 const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user } = useStore();
-  return user ? <>{children}</> : <Navigate to="/auth" />;
+  const { user, isLoading } = useStore();
+  
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0a092d]">
+        <div className="animate-spin text-4xl mb-4 text-primary">⏳</div>
+      </div>
+    );
+  }
+
+  return user ? <>{children}</> : <Navigate to="/auth" replace />;
 };
 
 export default function App() {
@@ -40,47 +49,32 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/auth" element={<Auth />} />
-            <Route 
-              path="/dashboard" 
-              element={
-                <PrivateRoute>
-                  <Dashboard />
-                </PrivateRoute>
-              } 
-            />
-            <Route 
-              path="/flashcards" 
-              element={
-                <PrivateRoute>
-                  <Flashcards />
-                </PrivateRoute>
-              } 
-            />
-            <Route 
-              path="/learning-path" 
-              element={
-                <PrivateRoute>
-                  <LearningPath />
-                </PrivateRoute>
-              } 
-            />
-            <Route 
-              path="/learn/:lessonId" 
-              element={
-                <PrivateRoute>
-                  <Learn />
-                </PrivateRoute>
-              } 
-            />
-            <Route 
-              path="/coming-soon" 
-              element={
-                <PrivateRoute>
-                  <ComingSoon />
-                </PrivateRoute>
-              } 
-            />
-            <Route path="*" element={<Navigate to="/" />} />
+            <Route path="/dashboard" element={
+              <PrivateRoute>
+                <Dashboard />
+              </PrivateRoute>
+            } />
+            <Route path="/flashcards" element={
+              <PrivateRoute>
+                <Flashcards />
+              </PrivateRoute>
+            } />
+            <Route path="/learning-path" element={
+              <PrivateRoute>
+                <LearningPath />
+              </PrivateRoute>
+            } />
+            <Route path="/learn/:lessonId" element={
+              <PrivateRoute>
+                <Learn />
+              </PrivateRoute>
+            } />
+            <Route path="/coming-soon" element={
+              <PrivateRoute>
+                <ComingSoon />
+              </PrivateRoute>
+            } />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
       </div>

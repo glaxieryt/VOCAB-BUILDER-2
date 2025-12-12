@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 
 export default function Auth() {
-  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const searchParams = new URLSearchParams(location.search);
   const isSignupInit = searchParams.get('mode') === 'signup';
   const [isSignup, setIsSignup] = useState(isSignupInit);
   const [username, setUsername] = useState('');
@@ -12,7 +14,6 @@ export default function Auth() {
   const [isLoading, setIsLoading] = useState(false);
   
   const { login, signup, authError, setAuthError, clearAuthError, isAuthenticated } = useStore();
-  const navigate = useNavigate();
 
   useEffect(() => {
     clearAuthError();

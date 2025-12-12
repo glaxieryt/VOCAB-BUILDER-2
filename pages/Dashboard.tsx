@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 
 // Icons components
 const FlashcardsIcon = () => (
@@ -70,6 +71,18 @@ const MenuButton = ({
 
 export default function Dashboard() {
   const { user } = useStore();
+  const navigate = useNavigate();
+
+  // Dashboard Protection: Double check session on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        navigate('/auth', { replace: true });
+      }
+    };
+    checkSession();
+  }, [navigate]);
 
   if (!user) return null;
 

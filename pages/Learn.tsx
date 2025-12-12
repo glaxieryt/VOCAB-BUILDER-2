@@ -107,7 +107,7 @@ const MCQView = ({ exercise, onAnswer, disabled }: { exercise: Exercise, onAnswe
 // --- Main Component ---
 
 export default function Learn() {
-  const { lessonId } = useParams();
+  const { lessonId } = useParams<{ lessonId: string }>();
   const navigate = useNavigate();
   const { completeLesson, addXP } = useStore();
   

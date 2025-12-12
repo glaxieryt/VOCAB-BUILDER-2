@@ -102,34 +102,23 @@ export default function Flashcards() {
         setCurrentIndex(prev => prev + 1);
       } else {
         // --- END OF DECK LOGIC ---
-        // We reached the end of the current queue.
-        // Recalculate remaining items from the *latest* flashcards state + our current update
-        // We filter for anything that is NOT 'know'
-        
-        // Note: 'flashcards' from the hook might be slightly stale in this closure, 
-        // but 'markFlashcard' updates the store state. 
-        // We can wait for the 'useEffect' to refill the queue, 
-        // OR we can manually trigger the refill logic here for smoother UX.
-        
         // Force queue clear to trigger useEffect refill
         setQueue([]);
         setRound(r => r + 1);
         setCurrentIndex(0);
-        
-        // If everything is done, the useEffect will catch it and set isFinished
       }
     }, 200);
   };
 
   const handleReset = async () => {
     // 1. Show Confirmation Popup
-    const confirmed = window.confirm("Are you sure you want to reset your progress? This will restart the entire deck.");
+    const confirmed = window.confirm("Are you sure you want to reset your progress? This will set all Mastered and Learning words back to zero.");
     if (!confirmed) return;
 
-    // 2. Trigger Reset
+    // 2. Trigger Reset in Store
     await resetFlashcards();
     
-    // 3. Reset Local State
+    // 3. Reset Local State explicitly to force UI update
     setQueue([]); 
     setIsFinished(false);
     setCurrentIndex(0);

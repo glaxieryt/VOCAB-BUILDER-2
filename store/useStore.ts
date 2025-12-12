@@ -54,9 +54,10 @@ export const useStore = create<AppState>((set, get) => ({
       // 1. Check if DB needs seeding
       const { count, error: countError } = await supabase.from('units').select('*', { count: 'exact', head: true });
       
-      if (countError) throw countError;
-
-      if (count === 0) {
+      if (countError) {
+        console.error("Database connection error:", countError);
+        // Do not throw here, let it proceed to session check or fail gracefully
+      } else if (count === 0) {
          await seedDatabase();
       }
 
@@ -66,7 +67,7 @@ export const useStore = create<AppState>((set, get) => ({
       
       if (session?.user) {
         // 3. Fetch User Profile
-        const { data: profile } = await supabase
+        const { data: profile, error: profileError } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', session.user.id)
@@ -86,6 +87,8 @@ export const useStore = create<AppState>((set, get) => ({
               avatar_url: profile.avatar_url
             }
           });
+        } else if (profileError) {
+          console.error("Error fetching profile:", profileError);
         }
       }
 
@@ -94,16 +97,20 @@ export const useStore = create<AppState>((set, get) => ({
 
       // 5. Auth Listener
       supabase.auth.onAuthStateChange(async (event, session) => {
-        if (event === 'SIGNED_IN') {
+        if (event === 'SIGNED_IN' && session) {
+          // Re-initialize to fetch profile and data
           get().initialize();
         } else if (event === 'SIGNED_OUT') {
           set({ user: null, isAuthenticated: false, units: [] });
         }
       });
 
-    } catch (error) {
-      console.error("Initialization error (falling back to mock data):", error);
-      set({ units: generateUnits(), authError: "Offline Mode: Using mock data" });
+    } catch (error: any) {
+      console.error("Initialization error:", error);
+      // Only set offline mode if it's a connection error, not an auth error
+      if (error?.message?.includes('fetch')) {
+         set({ units: generateUnits(), authError: "Offline Mode: Using mock data" });
+      }
     } finally {
       set({ isLoading: false });
     }
@@ -158,7 +165,6 @@ export const useStore = create<AppState>((set, get) => ({
 
          const mappedLessons: LessonNode[] = sortedLessons.map((l: any, index: number) => {
             const progress = lessonProgressMap[l.id];
-            // Check 'is_completed' from DB column, default to false
             const isCompleted = !!progress?.is_completed;
             
             let isLocked = true;
@@ -227,19 +233,23 @@ export const useStore = create<AppState>((set, get) => ({
     // ------------------
 
     const email = username.includes('@') ? username : `${username}@example.com`;
-    const { error } = await supabase.auth.signInWithPassword({
+    
+    // 1. ACTUAL Database Check
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password
     });
 
+    // 2. CRITICAL: Stop if user doesn't exist or password is wrong
     if (error) {
-      let msg = error.message;
-      if (msg.includes("Invalid login credentials")) {
-        msg = "No user found with these details. Please Sign Up first.";
-      }
-      set({ authError: msg });
-    } else {
-      set({ authError: null });
+      console.error("Login failed:", error.message);
+      set({ authError: "Invalid login details. Please check your password or Sign Up." });
+      return; 
+    }
+
+    if (data.user) {
+       set({ authError: null });
+       // Logic to update user state continues in onAuthStateChange
     }
   },
 
@@ -291,7 +301,7 @@ export const useStore = create<AppState>((set, get) => ({
     const unitSeq = parseInt(parts[1]);
     const lessonNum = parseInt(parts[3]);
 
-    // --- OPTIMISTIC / MOCK UPDATE ---
+    // --- OPTIMISTIC UPDATE ---
     let nextUnitUnlocked = false;
 
     const updatedUnits = units.map(u => {
@@ -334,7 +344,10 @@ export const useStore = create<AppState>((set, get) => ({
     const unit = units.find(u => u.id === unitSeq);
     const lesson = unit?.lessons.find(l => l.lessonNumber === lessonNum);
 
-    if (!lesson || !(lesson as any).dbId) return;
+    if (!lesson || !(lesson as any).dbId) {
+        console.error("Lesson DB ID not found, cannot save progress.");
+        return;
+    }
 
     const dbLessonId = (lesson as any).dbId;
     const dbUnitId = (unit as any).dbId;
@@ -350,7 +363,11 @@ export const useStore = create<AppState>((set, get) => ({
         stars
       }, { onConflict: 'user_id, lesson_id' });
 
-    if (error) console.error("Error saving progress:", error);
+    if (error) {
+        console.error("Error saving lesson progress:", error);
+    } else {
+        console.log("Lesson progress saved successfully.");
+    }
 
     if (lesson.type === 'test' && score >= 75) {
        const nextUnitSeq = unitSeq + 1;
@@ -401,11 +418,10 @@ export const useStore = create<AppState>((set, get) => ({
     const { user } = get();
     if (!user) return;
 
-    // Mock Mode: LOAD ALL 1161 WORDS
+    // Mock Mode
     if (!isSupabaseConfigured) {
       const mockSession: FlashcardItem[] = [];
-      // Generate exactly 1161 items as requested
-      const TOTAL_WORDS = 1161; 
+      const TOTAL_WORDS = SEED_VOCABULARY.length > 0 ? SEED_VOCABULARY.length : 1161; 
       
       for (let i = 0; i < TOTAL_WORDS; i++) {
         const word = getWordByGlobalIndex(i);
@@ -430,14 +446,13 @@ export const useStore = create<AppState>((set, get) => ({
       if (countError) throw countError;
 
       // 2. Fix the "20 Words Bug": If the deck is small (incomplete), force populate via RPC
-      // The requirement is 1161 words. If significantly less, we reset.
       if (count === null || count < 100) {
         console.log("Deck incomplete. Initializing full vocabulary via RPC...");
         const { error: rpcError } = await supabase.rpc('reset_flashcard_session');
         if (rpcError) throw rpcError;
       }
 
-      // 3. Fetch ALL items with Pagination (Supabase defaults to 1000 rows max)
+      // 3. Fetch ALL items with Pagination
       let allItems: FlashcardItem[] = [];
       let page = 0;
       const pageSize = 1000;
@@ -485,10 +500,15 @@ export const useStore = create<AppState>((set, get) => ({
     }));
 
     if (isSupabaseConfigured) {
-      await supabase
+      const { error } = await supabase
         .from('user_flashcard_session_items')
         .update({ session_state: state })
         .eq('id', itemId);
+        
+      if (error) {
+          console.error("Failed to update flashcard state in DB:", error);
+          // Optionally revert optimistic update here if critical
+      }
     }
   },
 
@@ -499,7 +519,8 @@ export const useStore = create<AppState>((set, get) => ({
     // Handle Mock Mode Reset
     if (!isSupabaseConfigured) {
       const mockSession: FlashcardItem[] = [];
-      const TOTAL_WORDS = 1161; 
+      const TOTAL_WORDS = SEED_VOCABULARY.length > 0 ? SEED_VOCABULARY.length : 1161; 
+      
       for (let i = 0; i < TOTAL_WORDS; i++) {
         const word = getWordByGlobalIndex(i);
         mockSession.push({
@@ -514,7 +535,7 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     // Handle Real DB Reset
-     // 1. Optimistic Update: INSTANTLY set all to pending
+     // 1. Optimistic Update
      set(prev => ({
        flashcards: prev.flashcards.map(item => ({ ...item, session_state: 'pending' }))
      }));
