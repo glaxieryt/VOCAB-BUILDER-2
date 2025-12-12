@@ -12,16 +12,25 @@ export default function Navbar() {
   return (
     <nav className="sticky top-0 z-50 h-16 glass border-b border-white/5">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-full flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2 group">
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center transform group-hover:rotate-12 transition-transform">
-            <span className="text-xl">🎓</span>
-          </div>
-          <span className="font-display font-bold text-xl tracking-tight">VocabMaster</span>
-        </Link>
+        <div className="flex items-center gap-8">
+          <Link to="/" className="flex items-center gap-2 group">
+            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center transform group-hover:rotate-12 transition-transform">
+              <span className="text-xl">🎓</span>
+            </div>
+            <span className="font-display font-bold text-xl tracking-tight">VocabMaster</span>
+          </Link>
+
+          {/* Dashboard Button - Visible to all, logic handles redirect */}
+          <Link 
+            to={user ? "/dashboard" : "/auth"} 
+            className="text-sm font-bold text-white hover:text-primary transition-colors"
+          >
+            Dashboard
+          </Link>
+        </div>
 
         {isAuthenticated && user ? (
           <div className="flex items-center gap-6">
-             <Link to="/dashboard" className="text-sm font-medium hover:text-primary transition-colors">Dashboard</Link>
              <div className="flex items-center gap-4 bg-surface/50 px-4 py-1.5 rounded-full border border-white/5">
                <div className="flex items-center gap-1" title="Daily Streak">
                  <span className="text-lg">🔥</span>
@@ -54,7 +63,7 @@ export default function Navbar() {
           </div>
         ) : (
           <div className="flex items-center gap-4">
-             <Link to="/auth" className="text-sm font-medium hover:text-white text-text-secondary transition-colors">Sign In</Link>
+             <Link to="/auth" className="text-sm font-medium hover:text-white text-text-secondary transition-colors">Login</Link>
              <Link 
               to="/auth?mode=signup" 
               className="bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-full text-sm font-bold transition-all shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5"

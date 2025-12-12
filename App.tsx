@@ -4,6 +4,7 @@ import Landing from './pages/Landing';
 import Dashboard from './pages/Dashboard';
 import LearningPath from './pages/LearningPath';
 import Learn from './pages/Learn';
+import Flashcards from './pages/Flashcards';
 import Auth from './pages/Auth';
 import ComingSoon from './pages/ComingSoon';
 import Navbar from './components/Navbar';
@@ -44,6 +45,14 @@ export default function App() {
               element={
                 <PrivateRoute>
                   <Dashboard />
+                </PrivateRoute>
+              } 
+            />
+            <Route 
+              path="/flashcards" 
+              element={
+                <PrivateRoute>
+                  <Flashcards />
                 </PrivateRoute>
               } 
             />

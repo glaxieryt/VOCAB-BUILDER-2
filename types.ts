@@ -50,3 +50,13 @@ export interface Exercise {
   options?: string[]; 
   correctAnswer: string;
 }
+
+// --- Flashcards ---
+export type FlashcardState = 'pending' | 'still_learning' | 'know';
+
+export interface FlashcardItem {
+  id: string; // The session item id
+  word_id: string;
+  word: VocabularyWord; // Joined data
+  session_state: FlashcardState;
+}

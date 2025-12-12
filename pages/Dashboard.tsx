@@ -77,12 +77,11 @@ export default function Dashboard() {
     <div className="max-w-2xl mx-auto px-4 py-12 flex flex-col gap-6">
       <h1 className="text-3xl font-bold font-display mb-4 text-center">Dashboard</h1>
       
-      {/* Flashcards */}
+      {/* Flashcards - Now Active */}
       <MenuButton 
         icon={<FlashcardsIcon />} 
         title="Flashcards" 
-        to="/coming-soon?feature=Flashcards" 
-        isComingSoon={true}
+        to="/flashcards" 
       />
 
       {/* Learn - Points to the actual Learning Path */}

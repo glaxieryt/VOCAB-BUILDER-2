@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { User, Unit, LessonNode } from '../types';
+import { User, Unit, LessonNode, FlashcardItem, FlashcardState } from '../types';
 import { seedDatabase } from '../lib/seeder';
-import { generateUnits } from '../lib/mockData';
+import { generateUnits, SEED_VOCABULARY } from '../lib/mockData';
 
 interface AppState {
   user: User | null;
   units: Unit[];
+  flashcards: FlashcardItem[];
   isAuthenticated: boolean;
   authError: string | null;
   isLoading: boolean;
@@ -20,11 +21,17 @@ interface AppState {
   initialize: () => Promise<void>;
   addXP: (amount: number) => Promise<void>;
   fetchCourseData: () => Promise<void>;
+
+  // Flashcard Actions
+  loadFlashcardSession: () => Promise<void>;
+  markFlashcard: (itemId: string, state: FlashcardState) => Promise<void>;
+  resetFlashcards: () => Promise<void>;
 }
 
 export const useStore = create<AppState>((set, get) => ({
   user: null,
   units: [],
+  flashcards: [],
   isAuthenticated: false,
   authError: null,
   isLoading: true,
@@ -226,7 +233,11 @@ export const useStore = create<AppState>((set, get) => ({
     });
 
     if (error) {
-      set({ authError: error.message });
+      let msg = error.message;
+      if (msg.includes("Invalid login credentials")) {
+        msg = "No user found with these details. Please Sign Up first.";
+      }
+      set({ authError: msg });
     } else {
       set({ authError: null });
     }
@@ -382,5 +393,107 @@ export const useStore = create<AppState>((set, get) => ({
         .update({ total_xp: newXP })
         .eq('id', user.id);
     }
+  },
+
+  // --- FLASHCARD ACTIONS ---
+  
+  loadFlashcardSession: async () => {
+    const { user } = get();
+    if (!user) return;
+
+    // Mock Mode
+    if (!isSupabaseConfigured) {
+      const mockSession = SEED_VOCABULARY.map(word => ({
+        id: `card-${word.id}`,
+        word_id: word.id,
+        word: word,
+        session_state: 'pending' as FlashcardState
+      }));
+      set({ flashcards: mockSession });
+      return;
+    }
+
+    try {
+      // 1. Fetch existing session items
+      const { data: existingItems, error: fetchError } = await supabase
+        .from('user_flashcard_session_items')
+        .select(`
+          id,
+          word_id,
+          session_state,
+          word:vocabulary_words(*)
+        `)
+        .eq('user_id', user.id);
+
+      if (fetchError) throw fetchError;
+
+      if (existingItems && existingItems.length > 0) {
+        set({ flashcards: existingItems as FlashcardItem[] });
+      } else {
+        // 2. If empty, create new session (Random 20)
+        // Note: In a real app, we'd use .rpc to get random rows efficiently
+        const { data: words } = await supabase
+          .from('vocabulary_words')
+          .select('*')
+          .limit(20); // Simplified random fetch
+
+        if (words) {
+          const newItems = words.map(w => ({
+            user_id: user.id,
+            word_id: w.id,
+            session_state: 'pending'
+          }));
+
+          const { data: insertedItems, error: insertError } = await supabase
+            .from('user_flashcard_session_items')
+            .insert(newItems)
+            .select(`
+              id,
+              word_id,
+              session_state,
+              word:vocabulary_words(*)
+            `);
+
+          if (insertError) throw insertError;
+          set({ flashcards: insertedItems as FlashcardItem[] });
+        }
+      }
+    } catch (e) {
+      console.error("Error loading flashcards:", e);
+    }
+  },
+
+  markFlashcard: async (itemId, state) => {
+    // Optimistic Update
+    set(prev => ({
+      flashcards: prev.flashcards.map(item => 
+        item.id === itemId ? { ...item, session_state: state } : item
+      )
+    }));
+
+    if (isSupabaseConfigured) {
+      await supabase
+        .from('user_flashcard_session_items')
+        .update({ session_state: state })
+        .eq('id', itemId);
+    }
+  },
+
+  resetFlashcards: async () => {
+     // Optimistic
+    set(prev => ({
+      flashcards: prev.flashcards.map(item => ({ ...item, session_state: 'pending' }))
+    }));
+
+    if (isSupabaseConfigured) {
+       const { user } = get();
+       if(user) {
+         await supabase
+          .from('user_flashcard_session_items')
+          .update({ session_state: 'pending' })
+          .eq('user_id', user.id);
+       }
+    }
   }
+
 }));
