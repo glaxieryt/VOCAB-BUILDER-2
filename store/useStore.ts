@@ -274,23 +274,18 @@ export const useStore = create<AppState>((set, get) => ({
     // Fallback: If store doesn't have it (rare, but safety), query it
     if (!dbLessonId) {
         try {
-            const { data: realUnit } = await supabase.from('units').select('id').eq('sequence_number', unitSeq).single();
+            const { data: realUnit } = await supabase.from('units').select('id').eq('sequence_number', unitSeq).maybeSingle();
             if (realUnit) {
                 const { data: realLesson } = await supabase.from('lessons')
                     .select('id')
                     .eq('unit_id', realUnit.id)
                     .eq('lesson_number', lessonNum)
-                    .single();
+                    .maybeSingle();
                 if (realLesson) dbLessonId = realLesson.id;
             }
         } catch (e) {
             console.warn("DB ID Lookup failed during completion", e);
         }
-    }
-
-    if (!dbLessonId) {
-        console.error("CRITICAL: Cannot save progress. No Database Lesson ID found.");
-        return;
     }
 
     // 2. Update UI instantly (Optimistic)
@@ -314,7 +309,13 @@ export const useStore = create<AppState>((set, get) => ({
         user: { ...user, total_xp: user.total_xp + xpEarned } 
     });
 
-    // 3. FORCE SAVE TO DATABASE (The User's Fix)
+    // Handle Mock Mode gracefully
+    if (!dbLessonId) {
+        console.warn("⚠️ Progress saved locally only (Lesson ID not found in DB). This is expected if running in mock/offline mode.");
+        return;
+    }
+
+    // 3. FORCE SAVE TO DATABASE
     try {
         console.log(`💾 Persisting lesson ${dbLessonId} for user ${user.id}...`);
         
@@ -342,7 +343,7 @@ export const useStore = create<AppState>((set, get) => ({
         console.log("✅ Progress Saved Successfully.");
         
     } catch (err) {
-        console.error("CRITICAL: Failed to save lesson progress:", err);
+        console.error("Failed to save lesson progress:", err);
     }
   },
 
